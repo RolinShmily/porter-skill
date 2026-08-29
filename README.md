@@ -10,7 +10,19 @@
 
 **Porter Skill (`porter-skill`)** 是专为 **AI 智能体（Agent）** 与**个人创作者**打造的跨平台（Windows / Linux / macOS）全自动流媒体搬运、AI 字幕提取、智能翻译与双版本熟肉视频压制出片流水线。
 
-只需给出一个 YouTube 链接，即可一键自动输出结构规范的**原始物料资产**与**高质量双版本硬字幕熟肉成品**。
+只需给出一个视频链接，即可一键自动输出结构规范的**原始物料资产**与**高质量双版本硬字幕熟肉成品**。
+
+---
+
+## 📺 平台支持与规划 (Supported Platforms & Roadmap)
+
+底层基于平台适配器模式（Adapter Pattern）设计，当前深度适配并首期聚焦 YouTube，其余主流流媒体平台正在逐步规划支持：
+
+- [x] **YouTube** (`youtube.com`, `youtu.be`) —— 深度适配（支持 1080p/4K 分离流下载、JS 签名挑战求解、多语言原生/机翻字幕提取、反爬/大会员 Cookie 会话注入）
+- [ ] **X / Twitter** (`x.com`, `twitter.com`) —— 规划中
+- [ ] **Bilibili (哔哩哔哩)** (`bilibili.com`) —— 规划中
+- [ ] **Instagram** (`instagram.com`) —— 规划中
+- [ ] **TikTok** (`tiktok.com`) —— 规划中
 
 ---
 
@@ -244,7 +256,7 @@ porter --config-set cookies_browser="chrome"
 项目配备了严格的类型检查与单元测试套件：
 
 ```bash
-# 运行单元与集成测试 (35 个测试全部通过)
+# 运行单元与集成测试
 pytest
 
 # 代码格式化与规范检查
@@ -254,6 +266,15 @@ ruff format --check .
 # 严格静态类型检查
 mypy porter_skill
 ```
+
+---
+
+## 🙏 鸣谢与致谢 (Acknowledgements)
+
+本项目站在巨人的肩膀上，特别鸣谢以下卓越的开源项目：
+
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) —— 强大健壮的流媒体音视频与字幕提取核心；
+- [FFmpeg](https://ffmpeg.org/) (with `libass`) —— 现代化多媒体处理与专业级矢量硬字幕渲染基石。
 
 ---
 
