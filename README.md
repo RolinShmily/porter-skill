@@ -1,0 +1,247 @@
+# Porter Skill (流媒体搬运工)
+
+<p align="center">
+  <a href="https://github.com/RolinShmily/porter-skill/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <img src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13%20%7C%203.14-blue" alt="Python Versions">
+  <img src="https://img.shields.io/badge/FFmpeg-libass-orange.svg" alt="FFmpeg libass">
+  <img src="https://img.shields.io/badge/code%20style-ruff-000000.svg" alt="Ruff">
+  <img src="https://img.shields.io/badge/type%20checked-mypy-blue" alt="mypy">
+</p>
+
+**Porter Skill (`porter-skill`)** 是专为 **AI 智能体（Agent）** 与**个人创作者**打造的跨平台（Windows / Linux / macOS）全自动流媒体搬运、AI 字幕提取、智能翻译与双版本熟肉视频压制出片流水线。
+
+只需给出一个 YouTube 链接，即可一键自动输出结构规范的**原始物料资产**与**高质量双版本硬字幕熟肉成品**。
+
+---
+
+## 🌟 核心特性 (Key Features)
+
+- ⚡ **极简依赖与开箱即用**：
+  - 系统底线依赖**仅需 Python (>= 3.10) 与 FFmpeg**。
+  - 无需预装任何外部收费工具或复杂的本地大型 ASR 二进制。
+- 🚀 **智能字幕极速直连 (Zero-Latency Fast Path)**：
+  - 自动探测并并发下载平台原生多语言字幕（如 YouTube `zh-Hans` / `zh` 翻译轨与 `en-orig` 原音轨）；
+  - 自动毫秒级中英文语义对齐与长单行合并，**0 延迟、0 API Token 消耗**快速出片。
+- 🎙️ **多引擎 ASR 链式自适应回退**：
+  - 当源视频无原生字幕时，流水线按序自动尝试语音转录：
+    $$\text{bijian (必剪免费)} \longrightarrow \text{jianying (剪映免费)} \longrightarrow \text{whisper-api} \longrightarrow \text{whisper-cpp}$$
+  - 任一引擎遭遇网络或格式异常自动无缝切换，确保 100% 成功提取字幕。
+- 🌐 **多层次翻译与上下文语义优化**：
+  - **LLM 大模型驱动（配置 API 时）**：支持 DeepSeek / OpenAI / Claude 等模型，智能断句并修正专业同音错词；
+  - **双引擎免费兜底（零配置时）**：Bing 翻译（优先） $\longrightarrow$ Google 翻译（回退），无配置亦可畅快使用。
+- 🎨 **专业级排版与确定性无损压制**：
+  - 中文主导排版：大号清晰中文字幕在上，自适应比例高亮英文字幕在下，单行居中不遮挡；
+  - 采用 FFmpeg `libass` 矢量渲染，视频 H.264 CRF 18 高清转码，音频 `-c:a copy` 直通复制，极速压制且音质 0 损耗。
+- 🍪 **反爬与大会员 Cookie 自动提取**：
+  - 原生支持 `--cookies-from-browser chrome/edge/firefox` 直接读取浏览器会话，轻松跨越 429 限流与年龄限制。
+
+---
+
+## 📁 极简两级输出目录规范
+
+每个任务以 `<video_id>_<safe_title>` 创建独立文件夹，保持极简的两级扁平结构：
+
+```text
+output/<video_id>_<safe_title>/
+├── raw/                              # 【一级：原始物料区 (Raw Assets)】
+│   ├── video.mp4                     # 原始标准母版 (H.264 + AAC 广播级封装, faststart)
+│   ├── audio.wav                     # 原始基准音轨 (16kHz 16bit 单声道 WAV)
+│   ├── subtitle.srt                  # 原始英文/源语言字幕 (长单行规整版)
+│   ├── subtitle_zh.srt (可选)        # 原始平台提取中文字幕 (若平台提供)
+│   ├── cover.jpg                     # 原始高清封面图
+│   └── metadata.json                 # 视频标题、标签、描述及抓取元数据
+│
+└── cooked/                           # 【二级：熟肉成品区 (Cooked Releases)】
+    ├── subtitle_bilingual.srt        # 中英双语字幕 (SRT 纯文本)
+    ├── subtitle_bilingual.ass        # 中英双语字幕 (ASS 矢量排版样式)
+    ├── subtitle_zh.srt               # 纯中文字幕 (SRT 纯文本)
+    ├── subtitle_zh.ass               # 纯中文字幕 (ASS 矢量排版样式)
+    ├── video_bilingual.mp4           # 【熟肉成品 1】烧录双语硬字幕高清视频
+    └── video_zh.mp4                  # 【熟肉成品 2】烧录纯中文硬字幕高清视频
+```
+
+---
+
+## 🛠️ 安装与快速上手 (Installation & Quickstart)
+
+### 1. 环境准备 (Windows / Linux / macOS)
+
+确保系统中已安装 **Python 3.10+** 和 **FFmpeg**（需包含 `libass` 库）：
+
+- **Windows 用户**（使用 winget 极速安装）：
+  ```powershell
+  winget install Python.Python.3.12
+  winget install Gyan.FFmpeg
+  ```
+- **Ubuntu / Debian 用户**：
+  ```bash
+  sudo apt update && sudo apt install -y ffmpeg python3 python3-pip
+  ```
+- **macOS 用户**：
+  ```bash
+  brew install ffmpeg python
+  ```
+
+### 2. 方式 A: 作为 Python CLI 工具安装
+
+```bash
+# 克隆仓库
+git clone https://github.com/RolinShmily/porter-skill.git
+cd porter-skill
+
+# 使用一键环境脚本配置（推荐）
+bash scripts/setup_env.sh
+
+# 或通过 pip / uv 安装
+pip install -e .
+```
+
+### 3. 方式 B: 作为 AI Agent Skill 目录直接使用
+
+本仓库符合标准 Agent Skill 规范，可直接克隆到 Agent 的技能目录（如 `pi-coding-agent`）：
+
+```bash
+git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/porter-skill
+```
+
+---
+
+## 💻 命令行使用指南 (CLI Usage)
+
+### 1. 环境体检与诊断
+```bash
+porter --doctor
+# 或使用免安装脚本:
+python scripts/run_porter.py --doctor
+```
+
+### 2. 标准搬运执行（下载 ➔ 提取 ➔ 翻译 ➔ 双版本出片）
+```bash
+# 标准出片
+porter "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./output"
+
+# 使用免安装脚本执行
+python scripts/run_porter.py "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./output"
+```
+
+### 3. 常用进阶参数
+```bash
+# 携带 Chrome 浏览器 Cookie（防 429 与年龄限制）
+porter "<URL>" --cookies-from-browser chrome
+
+# 仅生成原始物料与字幕文件，跳过视频压制
+porter "<URL>" --skip-burn
+
+# 仅压制双语版本熟肉
+porter "<URL>" --only-bilingual
+
+# 仅压制纯中文版本熟肉
+porter "<URL>" --only-zh
+```
+
+---
+
+## ⚙️ 配置文件与环境设置 (`config.json`)
+
+系统默认具备 0 配置兜底能力。若需使用 DeepSeek/OpenAI 大模型翻译或自定义字幕字体样式，可复制 `config.example.json` 为 `config.json`：
+
+```bash
+cp config.example.json config.json
+```
+
+```json
+{
+  "llm": {
+    "api_key": "sk-your-deepseek-or-openai-key",
+    "api_base": "https://api.deepseek.com/v1",
+    "model": "deepseek-chat"
+  },
+  "asr": {
+    "engine": "bijian",
+    "language": "auto",
+    "whisper_api_key": "",
+    "whisper_api_base": "https://api.openai.com/v1",
+    "whisper_model": "whisper-1"
+  },
+  "style": {
+    "zh_font": "Microsoft YaHei",
+    "en_font": "Arial",
+    "zh_font_size": 52,
+    "en_font_size": 34,
+    "zh_primary_color": "&H00FFFFFF",
+    "en_primary_color": "&H0000FFFF",
+    "outline_color": "&H00000000",
+    "outline_width": 3.5,
+    "shadow": 1.5,
+    "margin_v": 30
+  },
+  "cookies_browser": "chrome",
+  "cookies_file": ""
+}
+```
+
+### 动态配置命令
+```bash
+# 查看当前生效配置（自动脱敏 Key）
+porter --config-show
+
+# 快速修改配置项
+porter --config-set llm.api_key="sk-..."
+porter --config-set cookies_browser="chrome"
+```
+
+---
+
+## 🏗️ 架构与扩展 (Architecture)
+
+流水线采用高度解耦的四阶段流水线设计（Pipeline & Adapter Pattern）：
+
+```
+[ 输入视频链接 ]
+       │
+       ▼
+┌────────────────────────────────────────┐
+│  Phase 1: 素材抓取 (Extractors)        │ ──> H.264 母版、16kHz WAV、原始字幕、高清封面
+└──────────────────┬─────────────────────┘
+                   │
+                   ▼
+┌────────────────────────────────────────┐
+│  Phase 2: 字幕提取与翻译 (Subtitle)    │ ──> 原生字幕对齐 / 多引擎 ASR / LLM 语义优化
+└──────────────────┬─────────────────────┘
+                   │
+                   ▼
+┌────────────────────────────────────────┐
+│  Phase 3: 字幕排版 (Formatting)        │ ──> 生成中英双语与纯中文 SRT / ASS 矢量样式
+└──────────────────┬─────────────────────┘
+                   │
+                   ▼
+┌────────────────────────────────────────┐
+│  Phase 4: FFmpeg 硬字幕压制 (Burn)     │ ──> video_bilingual.mp4 & video_zh.mp4
+└────────────────────────────────────────┘
+```
+
+详细技术架构与各阶段输入输出规约请参阅 [references/ARCHITECTURE.md](references/ARCHITECTURE.md)。
+
+---
+
+## 🧪 自动化测试与质量保障
+
+项目配备了严格的类型检查与单元测试套件：
+
+```bash
+# 运行单元与集成测试 (35 个测试全部通过)
+pytest
+
+# 代码格式化与规范检查
+ruff check .
+ruff format --check .
+
+# 严格静态类型检查
+mypy porter_skill
+```
+
+---
+
+## 📄 开源许可证 (License)
+
+本项目基于 [MIT License](LICENSE) 协议开源。

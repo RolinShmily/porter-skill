@@ -1,0 +1,121 @@
+"""Tests for FFmpeg subtitle synthesis and path escaping."""
+
+import subprocess
+
+import pytest
+
+from porter_skill.config import PorterConfig
+from porter_skill.synthesizer.burn import burn_dual_release, burn_hardsub
+from porter_skill.synthesizer.utils import escape_ffmpeg_filter_path
+
+
+def test_escape_ffmpeg_filter_path():
+    """Verify path escaping for FFmpeg filters across Windows and Linux path formats."""
+    # Standard linux path
+    p1 = "/home/user/output/video.ass"
+    escaped1 = escape_ffmpeg_filter_path(p1)
+    assert "\\:" in escaped1 or ":" not in escaped1
+    assert "\\" not in escaped1.replace(r"\:", "")
+
+    # Path with spaces and quotes
+    p2 = "/tmp/my's [video]/sub.ass"
+    escaped2 = escape_ffmpeg_filter_path(p2)
+    assert r"\'" in escaped2
+    assert r"\[" in escaped2
+    assert r"\]" in escaped2
+
+    # Windows-style simulated path with colon
+    p3 = "C:/Users/user/sub.ass"
+    escaped3 = escape_ffmpeg_filter_path(p3)
+    assert r"\:" in escaped3
+
+
+@pytest.fixture
+def synthetic_video_and_sub(tmp_path):
+    """Generate a minimal 1-second synthetic MP4 video and test ASS subtitle."""
+    video_path = tmp_path / "test_video.mp4"
+    ass_path = tmp_path / "test_sub.ass"
+    srt_path = tmp_path / "test_sub.srt"
+
+    # Create 1s synthetic MP4 with FFmpeg
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc=duration=1:size=320x240:rate=24",
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=r=44100:cl=stereo",
+        "-t",
+        "1",
+        "-c:v",
+        "libx264",
+        "-c:a",
+        "aac",
+        str(video_path),
+    ]
+    subprocess.run(cmd, check=True, capture_output=True)
+
+    # Create ASS subtitle
+    ass_content = """[Script Info]
+Title: Test
+ScriptType: v4.00+
+PlayResX: 320
+PlayResY: 240
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,1,2,10,10,10,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hello Test
+"""
+    ass_path.write_text(ass_content, encoding="utf-8")
+
+    # Create SRT subtitle
+    srt_content = """1
+00:00:00,000 --> 00:00:01,000
+Hello Test
+"""
+    srt_path.write_text(srt_content, encoding="utf-8")
+
+    return video_path, ass_path, srt_path
+
+
+def test_burn_hardsub_real_ffmpeg(synthetic_video_and_sub, tmp_path):
+    """Test burning hard subtitles into real video using FFmpeg libass."""
+    video_in, ass_sub, _ = synthetic_video_and_sub
+    video_out = tmp_path / "output_burned.mp4"
+
+    res = burn_hardsub(video_in, ass_sub, video_out)
+    assert res.exists()
+    assert res.stat().st_size > 0
+
+
+def test_burn_dual_release(synthetic_video_and_sub, tmp_path):
+    """Test burning dual release videos."""
+    video_in, ass_sub, _ = synthetic_video_and_sub
+    cooked_dir = tmp_path / "cooked"
+    cooked_dir.mkdir(parents=True, exist_ok=True)
+
+    bi_ass = cooked_dir / "subtitle_bilingual.ass"
+    zh_ass = cooked_dir / "subtitle_zh.ass"
+    bi_ass.write_text(ass_sub.read_text(encoding="utf-8"), encoding="utf-8")
+    zh_ass.write_text(ass_sub.read_text(encoding="utf-8"), encoding="utf-8")
+
+    res = burn_dual_release(
+        raw_video=video_in,
+        bilingual_ass=bi_ass,
+        zh_ass=zh_ass,
+        cooked_dir=cooked_dir,
+        config=PorterConfig(),
+    )
+
+    assert res.video_bilingual is not None and res.video_bilingual.exists()
+    assert res.video_zh is not None and res.video_zh.exists()
+    assert res.video_bilingual.stat().st_size > 0
+    assert res.video_zh.stat().st_size > 0
