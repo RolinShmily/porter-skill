@@ -274,6 +274,7 @@ mypy porter_skill
 本项目站在巨人的肩膀上，特别鸣谢以下卓越的开源项目：
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) —— 强大健壮的流媒体音视频与字幕提取核心；
+- [VideoCaptioner](https://github.com/WEIFENG2333/VideoCaptioner) —— 优秀的跨平台音视频字幕断句、ASR 转录与翻译工具；
 - [FFmpeg](https://ffmpeg.org/) (with `libass`) —— 现代化多媒体处理与专业级矢量硬字幕渲染基石。
 
 ---
