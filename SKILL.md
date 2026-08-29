@@ -7,10 +7,14 @@ description: Automated video localization, multi-engine ASR speech-to-text, subt
 
 Porter Skill (`porter-skill`) 是专为 AI Agent 设计的跨平台（Windows / Linux）全自动流媒体搬运与熟肉制作流水线。
 
-本仓库本身即为一个**完整自包含的 Agent Skill 目录**，可直接克隆至 Agent Skills 目录中使用：
+本仓库本身即为一个**完整自包含的 Agent Skill 目录**，可通过 `skills` 客户端一键安装或直接克隆至 Agent Skills 目录中使用：
 
 ```bash
-git clone <REPO_URL> ~/.pi/agent/skills/porter-skill
+# 推荐：使用 npx skills add 一键安装
+npx skills add RolinShmily/porter-skill -g
+
+# 或手动 Git Clone 到 Agent 技能目录
+git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/porter-skill
 ```
 
 系统环境底线**仅需 Python (>= 3.10) 与 FFmpeg**。无需预装任何外部收费工具或本地 ASR 二进制。

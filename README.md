@@ -82,7 +82,22 @@ output/<video_id>_<safe_title>/
   brew install ffmpeg python
   ```
 
-### 2. 方式 A: 作为 Python CLI 工具安装
+### 2. 方式 A: 通过 `npx skills add` 一键为 AI Agent 安装（推荐）
+
+适用于各类支持 Agent Skills 规范的 AI 编程助手（如 Pi Coding Agent, Claude Code, Cursor, Windsurf 等）：
+
+```bash
+# 全局安装到所有检测到的 AI Agent (推荐)
+npx skills add RolinShmily/porter-skill -g
+
+# 或安装到当前项目工作区
+npx skills add RolinShmily/porter-skill
+
+# 指定特定 Agent 并自动确认 (如 pi, claude-code)
+npx skills add RolinShmily/porter-skill -g -a pi -y
+```
+
+### 3. 方式 B: 作为独立 Python CLI 工具安装
 
 ```bash
 # 克隆仓库
@@ -96,9 +111,9 @@ bash scripts/setup_env.sh
 pip install -e .
 ```
 
-### 3. 方式 B: 作为 AI Agent Skill 目录直接使用
+### 4. 方式 C: 手动 Git Clone 到 Agent 技能目录
 
-本仓库符合标准 Agent Skill 规范，可直接克隆到 Agent 的技能目录（如 `pi-coding-agent`）：
+本仓库符合标准 Agent Skill 规范，亦可直接克隆到 Agent 的技能目录（如 `pi-coding-agent`）：
 
 ```bash
 git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/porter-skill
