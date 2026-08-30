@@ -5,6 +5,8 @@ from porter_skill.subtitle.controller import (
     generate_subtitles,
     has_chinese_translation,
     run_asr_transcription,
+    transcribe_with_bcut,
+    transcribe_with_google_stt,
 )
 from porter_skill.subtitle.formatter import (
     SubtitleItem,
@@ -24,9 +26,11 @@ from porter_skill.subtitle.formatter import (
     split_chinese_text_by_phrase,
 )
 from porter_skill.subtitle.translator import (
+    translate_sentences_with_bing_http,
     translate_sentences_with_direct_llm,
     translate_sentences_with_google_http,
     translate_sentences_with_mymemory_http,
+    translate_with_bing_http,
     translate_with_direct_llm,
     translate_with_google_http,
     translate_with_mymemory_http,
@@ -53,9 +57,13 @@ __all__ = [
     "save_transcript_txt",
     "split_chinese_sentence_into_cues",
     "split_chinese_text_by_phrase",
+    "transcribe_with_bcut",
+    "transcribe_with_google_stt",
+    "translate_sentences_with_bing_http",
     "translate_sentences_with_direct_llm",
     "translate_sentences_with_google_http",
     "translate_sentences_with_mymemory_http",
+    "translate_with_bing_http",
     "translate_with_direct_llm",
     "translate_with_google_http",
     "translate_with_mymemory_http",

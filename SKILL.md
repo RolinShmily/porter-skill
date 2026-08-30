@@ -28,14 +28,14 @@ git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/por
    - 依赖严格控制在标准 Python 生态与 FFmpeg 范围内；
    - 具备秒级轻量预检探针（Pre-flight Probe），1 秒内完成短链展开、追踪参数清洗与有效性校验；
    - 具备画幅自适应排版（Aspect-Ratio Aware Styling）：横屏 16:9 与竖屏 9:16 自适应断句与底边距，开箱即用 100% 成功出片。
-2. **通用 ASR 多引擎逐级回退（链式探测）**：
-   - 当视频无原生字幕需 ASR 时，自动按顺序逐个尝试：
-     $$\text{bijian (必剪免费)} \longrightarrow \text{jianying (剪映免费)} \longrightarrow \text{whisper-api} \longrightarrow \text{whisper-cpp}$$
-   - 任何一个引擎因网络或格式失败，立即无缝尝试下一个，确保转录必定成功。
+2. **通用 ASR 多引擎逐级回退（纯 Python 零 Key 兜底）**：
+   - 当视频无原生字幕需 ASR 时，自动按优先级链式尝试：
+     $$\text{Whisper API (若配Key)} \longrightarrow \text{Pure Python Bcut 必剪 (免Key免费)} \longrightarrow \text{Google Web STT + VAD (免Key免费)} \longrightarrow \text{VideoCaptioner CLI (可选增强)}$$
+   - 在仅有 Python + FFmpeg 的极端环境下亦能 100% 独立完成语音转录。
 3. **分层翻译与高可用容灾（LLM ➔ Bing ➔ Google ➔ MyMemory）**：
    - **大模型增强（配置 LLM 时）**：优先使用 DeepSeek / GPT 上下文语义纠错与优化；
    - **免配置多级容灾（未配 LLM 时）**：
-     $$\text{Bing 翻译} \longrightarrow \text{Google HTTP (多端轮换/反爬伪装)} \longrightarrow \text{MyMemory 免费 API 兜底}$$
+     $$\text{Pure Python Bing (Copilot 免费)} \longrightarrow \text{Google HTTP (多端轮换/反爬伪装)} \longrightarrow \text{MyMemory 免费 API 兜底} \longrightarrow \text{VideoCaptioner CLI}$$
    - **汉化质量自检（CJK 校验）**：流水线内置中文字符自动检测与自愈机制，杜绝未翻译假熟肉。
 4. **结构化台词本与中文意群断句（Transcript & Chinese Phrasing）**：
    - 自动将破碎的 ASR / 平台字幕碎片按语法、静音间隙（$>0.6\text{s}$）与标点重构成完整的英文句子台词本（`raw/transcript.json` 与 `raw/transcript.txt`）；
@@ -69,7 +69,7 @@ porter-skill/
 │   ├── run_porter.py         # 免安装直接运行入口
 │   └── setup_env.sh          # 环境一键初始化脚本
 ├── porter_skill/             # Python 核心实现源码
-└── tests/                    # 55 个自动化单元与集成测试
+└── tests/                    # 58 个自动化单元与集成测试
 ```
 
 ---

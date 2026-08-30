@@ -5,7 +5,12 @@ from unittest.mock import MagicMock, patch
 
 from porter_skill.config import LLMConfig, PorterConfig
 from porter_skill.extractors.base import RawMaterialResult, VideoMetadata
-from porter_skill.subtitle.controller import generate_subtitles, has_chinese_translation
+from porter_skill.subtitle.controller import (
+    generate_subtitles,
+    has_chinese_translation,
+    transcribe_with_bcut,
+    transcribe_with_google_stt,
+)
 from porter_skill.subtitle.formatter import (
     SubtitleItem,
     TranscriptSentence,
@@ -26,8 +31,10 @@ from porter_skill.subtitle.formatter import (
     srt_time_to_ms,
 )
 from porter_skill.subtitle.translator import (
+    translate_sentences_with_bing_http,
     translate_sentences_with_direct_llm,
     translate_sentences_with_google_http,
+    translate_with_bing_http,
     translate_with_google_http,
     translate_with_mymemory_http,
 )
@@ -440,3 +447,144 @@ def test_translate_with_mymemory_http():
         results = translate_with_mymemory_http(items)
         assert len(results) == 1
         assert results[0].target_text == "你好"
+
+
+def test_translate_sentences_with_bing_http_mock():
+    """Verify pure Python Bing HTTP translator on transcript sentences."""
+    sentences = [
+        TranscriptSentence(
+            sentence_id=1,
+            start_ms=0,
+            end_ms=3000,
+            en_text="We need to move fast.",
+            zh_text="",
+        )
+    ]
+    with patch("porter_skill.subtitle.translator.requests.Session") as mock_session_cls:
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        # Mock translator page response with IG, IID and AbusePreventionHelper
+        mock_page_resp = MagicMock()
+        mock_page_resp.text = (
+            'IG:"1234567890ABCDEF" data-iid="translator.5025" '
+            'params_AbusePreventionHelper = [1788099292818,"mock_token_key",3600000];'
+        )
+        mock_session.get.return_value = mock_page_resp
+
+        # Mock translate post response
+        mock_trans_resp = MagicMock()
+        mock_trans_resp.status_code = 200
+        mock_trans_resp.json.return_value = [{"translations": [{"text": "我们需要快速行动。"}]}]
+        mock_session.post.return_value = mock_trans_resp
+
+        res = translate_sentences_with_bing_http(sentences)
+        assert len(res) == 1
+        assert res[0].zh_text == "我们需要快速行动。"
+
+        item_res = translate_with_bing_http(
+            [
+                SubtitleItem(
+                    index=1,
+                    start_ms=0,
+                    end_ms=3000,
+                    source_text="We need to move fast.",
+                    target_text="",
+                )
+            ]
+        )
+        assert len(item_res) == 1
+        assert item_res[0].target_text == "我们需要快速行动。"
+
+
+def test_transcribe_with_bcut_mock(tmp_path):
+    """Verify pure Python Bcut ASR with mocked HTTP upload and result polling."""
+    audio_file = tmp_path / "audio.wav"
+    audio_file.write_bytes(b"dummy wav data")
+    out_srt = tmp_path / "out.srt"
+
+    with (
+        patch("porter_skill.subtitle.controller.requests.post") as mock_post,
+        patch("porter_skill.subtitle.controller.requests.put") as mock_put,
+        patch("porter_skill.subtitle.controller.requests.get") as mock_get,
+    ):
+        # Mock resource create
+        mock_create = MagicMock()
+        mock_create.status_code = 200
+        mock_create.json.return_value = {
+            "data": {
+                "in_boss_key": "k",
+                "resource_id": "r",
+                "upload_id": "u",
+                "upload_urls": ["https://mock.upload/part1"],
+                "per_size": 1024 * 1024,
+            }
+        }
+        # Mock commit complete
+        mock_commit = MagicMock()
+        mock_commit.status_code = 200
+        mock_commit.json.return_value = {"data": {"download_url": "https://mock.dl/a.wav"}}
+        # Mock create task
+        mock_task = MagicMock()
+        mock_task.status_code = 200
+        mock_task.json.return_value = {"data": {"task_id": "task_123"}}
+
+        mock_post.side_effect = [mock_create, mock_commit, mock_task]
+
+        # Mock put part
+        mock_put_resp = MagicMock()
+        mock_put_resp.headers = {"Etag": "etag_123"}
+        mock_put.return_value = mock_put_resp
+
+        # Mock query result
+        mock_q_resp = MagicMock()
+        mock_q_resp.status_code = 200
+        mock_q_resp.json.return_value = {
+            "data": {
+                "state": 4,
+                "result": json.dumps(
+                    {
+                        "utterances": [
+                            {"start_time": 0, "end_time": 2000, "transcript": "Hello from Bcut ASR"}
+                        ]
+                    }
+                ),
+            }
+        }
+        mock_get.return_value = mock_q_resp
+
+        success = transcribe_with_bcut(audio_file, out_srt)
+        assert success is True
+        assert out_srt.is_file()
+        assert "Hello from Bcut ASR" in out_srt.read_text(encoding="utf-8")
+
+
+def test_transcribe_with_google_stt_mock(tmp_path):
+    """Verify pure Python Google Web Speech STT with mocked FFmpeg VAD and speechrecognition."""
+    audio_file = tmp_path / "audio.wav"
+    audio_file.write_bytes(b"dummy wav data")
+    out_srt = tmp_path / "out.srt"
+    cfg = PorterConfig()
+
+    with (
+        patch("subprocess.run") as mock_subproc,
+        patch("speech_recognition.Recognizer") as mock_r_cls,
+        patch("speech_recognition.AudioFile"),
+    ):
+        # Mock ffmpeg silencedetect & ffprobe duration
+        mock_vad = MagicMock()
+        mock_vad.stderr = (
+            "[silencedetect @ 0x...] silence_start: 2.0\n[silencedetect @ 0x...] silence_end: 2.5"
+        )
+        mock_probe = MagicMock()
+        mock_probe.stdout = "5.0\n"
+        mock_subproc.side_effect = [mock_vad, mock_probe]
+
+        mock_r = MagicMock()
+        mock_r.recognize_google.return_value = "Hello from Google STT"
+        mock_r_cls.return_value = mock_r
+
+        success = transcribe_with_google_stt(audio_file, out_srt, cfg)
+        assert success is True
+        assert out_srt.is_file()
+        assert "Hello from Google STT" in out_srt.read_text(encoding="utf-8")

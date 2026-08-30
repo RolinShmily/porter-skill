@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -29,6 +30,146 @@ def _get_videocaptioner_bin() -> str | None:
     if user_vc.is_file() and os.access(user_vc, os.X_OK):
         return str(user_vc)
     return None
+
+
+def translate_sentences_with_bing_http(
+    sentences: list[TranscriptSentence],
+    target_lang: str = "zh-Hans",
+) -> list[TranscriptSentence]:
+    """
+    Pure Python translation of transcript sentences using free Microsoft Bing Web Translator API.
+    Dynamically extracts IG/IID and AbusePreventionHelper key/token for zero-key LLM-enhanced translation.
+    """
+    if not sentences:
+        return []
+
+    session = requests.Session()
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0"
+        ),
+        "Referer": "https://www.bing.com/translator",
+    }
+
+    try:
+        r = session.get("https://www.bing.com/translator", headers=headers, timeout=10)
+        ig_m = re.search(r"IG:\"([A-Za-z0-9]+)\"", r.text)
+        iid_m = re.search(r"data-iid=\"([^\"]+)\"", r.text)
+        token_m = re.search(r"params_AbusePreventionHelper\s*=\s*\[([0-9]+),\"([^\"]+)\"", r.text)
+
+        if not (ig_m and iid_m and token_m):
+            return []
+
+        ig, iid, key, token = ig_m.group(1), iid_m.group(1), token_m.group(1), token_m.group(2)
+        url = f"https://www.bing.com/ttranslatev3?isVertical=1&&IG={ig}&IID={iid}"
+    except Exception as e:  # noqa: BLE001
+        print(f"  [WARN] Failed to initialize Bing Translator session: {e}")
+        return []
+
+    translated_sentences: list[TranscriptSentence] = []
+    batch_size = 15
+    delimiter = "\n\n"
+
+    for i in range(0, len(sentences), batch_size):
+        batch = sentences[i : i + batch_size]
+        combined_text = delimiter.join(s.en_text for s in batch)
+
+        batch_success = False
+        try:
+            data = {
+                "fromLang": "auto-detect",
+                "text": combined_text,
+                "to": target_lang,
+                "key": key,
+                "token": token,
+            }
+            resp = session.post(url, data=data, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                if isinstance(res_json, list) and res_json and "translations" in res_json[0]:
+                    trans_text = res_json[0]["translations"][0]["text"]
+                    parts = [p.strip() for p in trans_text.split(delimiter) if p.strip()]
+                    if len(parts) == len(batch):
+                        for idx, s in enumerate(batch):
+                            translated_sentences.append(
+                                TranscriptSentence(
+                                    sentence_id=s.sentence_id,
+                                    start_ms=s.start_ms,
+                                    end_ms=s.end_ms,
+                                    en_text=s.en_text,
+                                    zh_text=parts[idx].strip() if parts[idx].strip() else s.en_text,
+                                    fragment_indices=s.fragment_indices,
+                                )
+                            )
+                        batch_success = True
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+        if batch_success:
+            continue
+
+        # Fallback: translate individually within batch
+        for s in batch:
+            zh_text = ""
+            try:
+                data_single = {
+                    "fromLang": "auto-detect",
+                    "text": s.en_text,
+                    "to": target_lang,
+                    "key": key,
+                    "token": token,
+                }
+                r_single = session.post(url, data=data_single, headers=headers, timeout=10)
+                if r_single.status_code == 200:
+                    rj = r_single.json()
+                    if isinstance(rj, list) and rj and "translations" in rj[0]:
+                        zh_text = rj[0]["translations"][0]["text"].strip()
+            except Exception:  # noqa: BLE001, S110
+                pass
+
+            translated_sentences.append(
+                TranscriptSentence(
+                    sentence_id=s.sentence_id,
+                    start_ms=s.start_ms,
+                    end_ms=s.end_ms,
+                    en_text=s.en_text,
+                    zh_text=zh_text or s.zh_text or s.en_text,
+                    fragment_indices=s.fragment_indices,
+                )
+            )
+
+    return translated_sentences
+
+
+def translate_with_bing_http(
+    items: list[SubtitleItem],
+    target_lang: str = "zh-Hans",
+) -> list[SubtitleItem]:
+    """Pure Python translation fallback of SubtitleItems using Bing Translator API."""
+    if not items:
+        return []
+    dummy_sentences = [
+        TranscriptSentence(
+            sentence_id=it.index,
+            start_ms=it.start_ms,
+            end_ms=it.end_ms,
+            en_text=it.source_text,
+            zh_text=it.target_text,
+        )
+        for it in items
+    ]
+    trans_sents = translate_sentences_with_bing_http(dummy_sentences, target_lang=target_lang)
+    return [
+        SubtitleItem(
+            index=s.sentence_id,
+            start_ms=s.start_ms,
+            end_ms=s.end_ms,
+            source_text=s.en_text,
+            target_text=s.zh_text,
+        )
+        for s in trans_sents
+    ]
 
 
 def translate_sentences_with_google_http(

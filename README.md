@@ -39,14 +39,14 @@
 - 🚀 **智能字幕极速直连 (Zero-Latency Fast Path)**：
   - 自动探测并并发下载平台原生多语言字幕（如 YouTube `zh-Hans` / `zh` 翻译轨与 `en-orig` 原音轨）；
   - 自动毫秒级中英文语义对齐与长单行合并，**0 延迟、0 API Token 消耗**快速出片。
-- 🎙️ **多引擎 ASR 链式自适应回退**：
+- 🎙️ **多引擎 ASR 链式自适应回退（纯 Python 零 Key 闭环）**：
   - 当源视频无原生字幕时，流水线按序自动尝试语音转录：
-    $$\text{bijian (必剪免费)} \longrightarrow \text{jianying (剪映免费)} \longrightarrow \text{whisper-api} \longrightarrow \text{whisper-cpp}$$
-  - 任一引擎遭遇网络或格式异常自动无缝切换，确保 100% 成功提取字幕。
+    $$\text{Whisper API (若配Key)} \longrightarrow \text{Pure Python Bcut 必剪 (免Key免费)} \longrightarrow \text{Google Web STT + VAD (免Key免费)} \longrightarrow \text{VideoCaptioner CLI (可选增强)}$$
+  - 在纯净 Python + FFmpeg 环境下 100% 独立完成语音转录，无需下载 GB 级离线权重。
 - 🌐 **多层次翻译与高可用容灾**：
   - **LLM 大模型驱动（配置 API 时）**：支持 DeepSeek / OpenAI / Claude 等模型，智能断句并修正专业同音错词；
   - **多级免配置兜底（零配置时）**：
-    $$\text{Bing 翻译} \longrightarrow \text{Google HTTP (多端轮换/反爬伪装)} \longrightarrow \text{MyMemory 免费 API 兜底}$$
+    $$\text{Pure Python Bing (Copilot 免费)} \longrightarrow \text{Google HTTP (多端轮换/反爬伪装)} \longrightarrow \text{MyMemory 免费 API 兜底} \longrightarrow \text{VideoCaptioner CLI}$$
   - **中文字符自检 (CJK Validation)**：自动检验并修复未翻译假熟肉，确保 100% 汉化成功。
 - ⚙️ **算力分级与硬件自适应极速压制**：
   - 自动探测宿主机硬件加速与 CPU 算力（Tier A: NVENC/QSV、Tier B: 8+核多线程、Tier C: N100/树莓派低功耗工控机）；

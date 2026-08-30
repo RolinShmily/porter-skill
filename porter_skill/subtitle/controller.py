@@ -1,10 +1,14 @@
 """Subtitle extraction, fallback orchestration, transcript generation, and styling controller."""
 
+import json
 import os
+import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import requests
 from openai import OpenAI
 
 from porter_skill.config import PorterConfig, get_default_config
@@ -19,6 +23,7 @@ from porter_skill.subtitle.formatter import (
     generate_zh_srt,
     is_cjk,
     merge_short_fragments,
+    ms_to_srt_time,
     normalize_subtitle_items,
     parse_srt,
     reconstruct_sentences_from_fragments,
@@ -28,6 +33,7 @@ from porter_skill.subtitle.formatter import (
 )
 from porter_skill.subtitle.translator import (
     _get_videocaptioner_bin,
+    translate_sentences_with_bing_http,
     translate_sentences_with_direct_llm,
     translate_sentences_with_google_http,
     translate_sentences_with_mymemory_http,
@@ -85,25 +91,264 @@ def transcribe_with_whisper_api(
     return False
 
 
+def transcribe_with_bcut(
+    audio_path: Path,
+    output_srt: Path,
+    config: PorterConfig | None = None,
+) -> bool:
+    """Pure-Python free speech recognition via Bilibili BCut ASR API with multipart upload & polling."""
+    if not audio_path.exists():
+        return False
+    try:
+        audio_data = audio_path.read_bytes()
+        if not audio_data:
+            return False
+
+        api_base = "https://member.bilibili.com/x/bcut/rubick-interface"
+        headers = {
+            "User-Agent": "Bilibili/1.0.0 (https://www.bilibili.com)",
+            "Content-Type": "application/json",
+        }
+
+        # 1. Request upload session
+        payload = json.dumps(
+            {
+                "type": 2,
+                "name": audio_path.name,
+                "size": len(audio_data),
+                "ResourceFileType": audio_path.suffix.lstrip(".") or "wav",
+                "model_id": "8",
+            }
+        )
+        resp = requests.post(
+            f"{api_base}/resource/create", data=payload, headers=headers, timeout=15
+        )
+        resp.raise_for_status()
+        res_data = resp.json().get("data", {})
+        if not res_data or "upload_urls" not in res_data:
+            return False
+
+        in_boss_key = res_data["in_boss_key"]
+        resource_id = res_data["resource_id"]
+        upload_id = res_data["upload_id"]
+        upload_urls = res_data["upload_urls"]
+        per_size = res_data["per_size"]
+        clips = len(upload_urls)
+
+        # 2. Upload chunks
+        etags: list[str] = []
+        for clip in range(clips):
+            start = clip * per_size
+            end = (clip + 1) * per_size
+            part_resp = requests.put(
+                upload_urls[clip], data=audio_data[start:end], headers=headers, timeout=30
+            )
+            part_resp.raise_for_status()
+            etag = part_resp.headers.get("Etag")
+            if etag:
+                etags.append(etag)
+
+        # 3. Commit upload
+        commit_data = json.dumps(
+            {
+                "InBossKey": in_boss_key,
+                "ResourceId": resource_id,
+                "Etags": ",".join(etags),
+                "UploadId": upload_id,
+                "model_id": "8",
+            }
+        )
+        commit_resp = requests.post(
+            f"{api_base}/resource/create/complete", data=commit_data, headers=headers, timeout=15
+        )
+        commit_resp.raise_for_status()
+        download_url = commit_resp.json().get("data", {}).get("download_url")
+        if not download_url:
+            return False
+
+        # 4. Create task
+        task_resp = requests.post(
+            f"{api_base}/task",
+            json={"resource": download_url, "model_id": "8"},
+            headers=headers,
+            timeout=15,
+        )
+        task_resp.raise_for_status()
+        task_id = task_resp.json().get("data", {}).get("task_id")
+        if not task_id:
+            return False
+
+        # 5. Poll task status
+        for _ in range(60):
+            q_resp = requests.get(
+                f"{api_base}/task/result",
+                params={"model_id": 7, "task_id": task_id},
+                headers=headers,
+                timeout=15,
+            )
+            q_resp.raise_for_status()
+            q_data = q_resp.json().get("data", {})
+            state = q_data.get("state")
+            if state == 4:
+                result_str = q_data.get("result", "{}")
+                result = json.loads(result_str) if isinstance(result_str, str) else result_str
+                utterances = result.get("utterances", [])
+                srt_lines: list[str] = []
+                for idx, u in enumerate(utterances, 1):
+                    start_ms = int(u.get("start_time", 0))
+                    end_ms = int(u.get("end_time", 0))
+                    text = u.get("transcript", "").strip()
+                    if not text:
+                        continue
+                    start_str = ms_to_srt_time(start_ms)
+                    end_str = ms_to_srt_time(end_ms)
+                    srt_lines.append(f"{idx}\n{start_str} --> {end_str}\n{text}\n")
+
+                if srt_lines:
+                    output_srt.write_text("\n".join(srt_lines), encoding="utf-8")
+                    return True
+                return False
+            time.sleep(1)
+    except Exception as e:  # noqa: BLE001
+        print(f"  [WARN] Bcut ASR transcription error: {e}")
+
+    return False
+
+
+def transcribe_with_google_stt(
+    audio_path: Path,
+    output_srt: Path,
+    config: PorterConfig,
+) -> bool:
+    """Pure-Python free speech recognition via Google Web Speech API with FFmpeg VAD interval chunking."""
+    try:
+        import speech_recognition as sr
+
+        cmd = [
+            "ffmpeg",
+            "-i",
+            str(audio_path),
+            "-af",
+            "silencedetect=noise=-30dB:d=0.4",
+            "-f",
+            "null",
+            "-",
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        silence_starts = [float(m) for m in re.findall(r"silence_start:\s*([\d.]+)", res.stderr)]
+        silence_ends = [float(m) for m in re.findall(r"silence_end:\s*([\d.]+)", res.stderr)]
+
+        probe_cmd = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(audio_path),
+        ]
+        probe_res = subprocess.run(probe_cmd, capture_output=True, text=True, check=False)
+        total_dur = float(probe_res.stdout.strip()) if probe_res.stdout.strip() else 0.0
+
+        intervals: list[tuple[float, float]] = []
+        curr = 0.0
+        for s_start, s_end in zip(silence_starts, silence_ends, strict=False):
+            if s_start > curr + 0.3:
+                intervals.append((curr, s_start))
+            curr = s_end
+        if curr < total_dur - 0.3:
+            intervals.append((curr, total_dur))
+
+        if not intervals:
+            intervals = [(0.0, total_dur)]
+
+        r = sr.Recognizer()
+        srt_lines: list[str] = []
+        idx = 1
+        lang = "zh-CN" if config.asr.language in ["zh", "zh-CN"] else "en-US"
+
+        for start_s, end_s in intervals:
+            p_start = max(0.0, start_s - 0.05)
+            p_end = min(total_dur, end_s + 0.35)
+            dur = max(0.5, p_end - p_start)
+            with sr.AudioFile(str(audio_path)) as source:
+                audio_data = r.record(source, offset=p_start, duration=dur)
+                try:
+                    text = r.recognize_google(audio_data, language=lang)
+                    if text and text.strip():
+                        start_str = ms_to_srt_time(int(start_s * 1000))
+                        end_str = ms_to_srt_time(int(p_end * 1000))
+                        srt_lines.append(f"{idx}\n{start_str} --> {end_str}\n{text.strip()}\n")
+                        idx += 1
+                except Exception:  # noqa: BLE001, S110
+                    pass
+
+        if srt_lines:
+            output_srt.write_text("\n".join(srt_lines), encoding="utf-8")
+            return True
+    except Exception as e:  # noqa: BLE001
+        print(f"  [WARN] Google STT transcription warning: {e}")
+    return False
+
+
 def run_asr_transcription(
     audio_path: Path,
     output_srt: Path,
     config: PorterConfig,
 ) -> bool:
-    """Run universal ASR speech recognition, testing candidate engines sequentially."""
+    """Run universal ASR speech recognition with pure Python fallbacks & optional CLI booster."""
     vc_bin = _get_videocaptioner_bin()
 
-    # Candidate ASR engines in priority order: bijian -> jianying -> whisper-api -> whisper-cpp
-    engines_to_try: list[str] = []
-    if config.asr.engine:
-        engines_to_try.append(config.asr.engine)
-    for fallback in ["bijian", "jianying", "whisper-api", "whisper-cpp"]:
-        if fallback not in engines_to_try:
-            engines_to_try.append(fallback)
+    # 1. If VideoCaptioner CLI is available and a specific engine was configured, try it first
+    if vc_bin and config.asr.engine in ["bijian", "jianying", "whisper-cpp"]:
+        print(f"  -> Attempting VideoCaptioner CLI ASR with engine '{config.asr.engine}'...")
+        cmd = [
+            vc_bin,
+            "transcribe",
+            str(audio_path),
+            "-o",
+            str(output_srt),
+            "--format",
+            "srt",
+            "--asr",
+            config.asr.engine,
+        ]
+        if config.asr.language and config.asr.language != "auto":
+            cmd.extend(["--language", config.asr.language])
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
+            if proc.returncode == 0 and output_srt.exists() and output_srt.stat().st_size > 0:
+                print(f"  ✓ VideoCaptioner CLI ASR succeeded with engine '{config.asr.engine}'.")
+                return True
+        except Exception as e:  # noqa: BLE001
+            print(f"  [WARN] VideoCaptioner CLI error: {e}. Falling back...")
 
+    # 2. Pure Python OpenAI Whisper API if API key configured
+    if config.asr.whisper_api_key or config.llm.api_key or os.environ.get("OPENAI_API_KEY"):
+        print("  -> Attempting pure Python Whisper API transcription...")
+        if transcribe_with_whisper_api(audio_path, output_srt, config):
+            print("  ✓ Pure Python Whisper API transcription succeeded.")
+            return True
+
+    # 3. Pure Python Bcut ASR (Free Bilibili Cloud Speech-to-Text)
+    print("  -> Attempting pure Python Bcut (Bilibili) ASR transcription...")
+    if transcribe_with_bcut(audio_path, output_srt, config):
+        print("  ✓ Pure Python Bcut ASR transcription succeeded.")
+        return True
+
+    # 4. Pure Python Google Web Speech STT (Free Google Speech API + VAD)
+    print("  -> Attempting pure Python Google Web Speech STT transcription...")
+    if transcribe_with_google_stt(audio_path, output_srt, config):
+        print("  ✓ Pure Python Google Web Speech STT succeeded.")
+        return True
+
+    # 5. Fallback to remaining VideoCaptioner CLI engines if available
     if vc_bin:
-        for engine in engines_to_try:
-            print(f"  -> Attempting ASR transcription with engine '{engine}'...")
+        for engine in ["jianying", "whisper-cpp"]:
+            if engine == config.asr.engine:
+                continue
+            print(f"  -> Attempting VideoCaptioner fallback engine '{engine}'...")
             cmd = [
                 vc_bin,
                 "transcribe",
@@ -115,30 +360,13 @@ def run_asr_transcription(
                 "--asr",
                 engine,
             ]
-            if config.asr.language and config.asr.language != "auto":
-                cmd.extend(["--language", config.asr.language])
-            if config.asr.whisper_api_key:
-                cmd.extend(["--whisper-api-key", config.asr.whisper_api_key])
-            if config.asr.whisper_api_base:
-                cmd.extend(["--whisper-api-base", config.asr.whisper_api_base])
-            if config.asr.whisper_model:
-                cmd.extend(["--whisper-model", config.asr.whisper_model])
-
             try:
                 proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, check=False)
                 if proc.returncode == 0 and output_srt.exists() and output_srt.stat().st_size > 0:
-                    print(f"  ✓ ASR transcription succeeded with engine '{engine}'.")
+                    print(f"  ✓ VideoCaptioner ASR succeeded with engine '{engine}'.")
                     return True
-                print(f"  [WARN] Engine '{engine}' did not produce subtitles. Trying next...")
-            except Exception as e:  # noqa: BLE001
-                print(f"  [WARN] Engine '{engine}' error: {e}. Trying next...")
-
-    # Fallback to Pure Python OpenAI Whisper API if configured
-    if config.asr.whisper_api_key or config.llm.api_key or os.environ.get("OPENAI_API_KEY"):
-        print("  -> Attempting pure Python Whisper API transcription...")
-        if transcribe_with_whisper_api(audio_path, output_srt, config):
-            print("  ✓ Pure Python Whisper API transcription succeeded.")
-            return True
+            except Exception:  # noqa: BLE001, S110
+                pass
 
     if not output_srt.exists():
         output_srt.write_text("", encoding="utf-8")
@@ -235,7 +463,14 @@ def generate_subtitles(
             if direct_sents and has_chinese_translation(direct_sents):
                 translated_sentences = direct_sents
 
-        # 2. Try VideoCaptioner LLM / Bing translation
+        # 2. Try Pure Python Bing (Copilot) HTTP translation (Free, zero-key, LLM-enhanced)
+        if not translated_sentences or not has_chinese_translation(translated_sentences):
+            print("  -> Translating whole sentences with Bing Translator (Free HTTP)...")
+            bing_sents = translate_sentences_with_bing_http(sentences, target_lang="zh-Hans")
+            if bing_sents and has_chinese_translation(bing_sents):
+                translated_sentences = bing_sents
+
+        # 3. Try VideoCaptioner CLI if available (LLM / Bing)
         if not translated_sentences or not has_chinese_translation(translated_sentences):
             temp_translated_srt = cooked_dir / ".tmp_translated.srt"
             if config.llm.api_key:
@@ -251,11 +486,10 @@ def generate_subtitles(
                         translated_sentences = reconstruct_sentences_from_fragments(cand_items)
 
             if not translated_sentences or not has_chinese_translation(translated_sentences):
-                print("  -> Attempting free whole-sentence translation with Bing Translator...")
-                success_bing = translate_with_videocaptioner_free(
+                success_bing_vc = translate_with_videocaptioner_free(
                     raw_srt_path, temp_translated_srt, engine="bing"
                 )
-                if success_bing and temp_translated_srt.exists():
+                if success_bing_vc and temp_translated_srt.exists():
                     cand_items = parse_srt(
                         temp_translated_srt.read_text(encoding="utf-8", errors="replace")
                     )
@@ -263,14 +497,14 @@ def generate_subtitles(
                     if cand_items and has_chinese_translation(cand_items):
                         translated_sentences = reconstruct_sentences_from_fragments(cand_items)
 
-        # 3. Free Translation: Try Google Translator fallback (Pure Python HTTP)
+        # 4. Free Translation: Try Google Translator fallback (Pure Python HTTP)
         if not translated_sentences or not has_chinese_translation(translated_sentences):
             print("  -> Falling back to Google Translator HTTP API...")
             google_sents = translate_sentences_with_google_http(sentences, target_lang="zh-CN")
             if google_sents and has_chinese_translation(google_sents):
                 translated_sentences = google_sents
 
-        # 4. Free Translation: Try MyMemory API fallback
+        # 5. Free Translation: Try MyMemory API fallback
         if not translated_sentences or not has_chinese_translation(translated_sentences):
             print("  -> Falling back to MyMemory API Translator...")
             mymemory_sents = translate_sentences_with_mymemory_http(sentences, target_lang="zh-CN")

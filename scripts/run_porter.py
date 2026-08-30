@@ -13,14 +13,26 @@ candidate_venvs = [
     Path.home() / ".pi" / "agent" / "skills" / "porter-skill" / ".venv" / "bin" / "python",
 ]
 
-for venv_python in candidate_venvs:
-    if venv_python.is_file() and sys.executable != str(venv_python):
-        try:
-            import pydantic  # noqa: F401
-            import yt_dlp  # noqa: F401
-        except ImportError:
+# If dependencies are missing, look for candidate venvs or auto-bootstrap
+try:
+    import pydantic  # noqa: F401
+    import requests  # noqa: F401
+    import yt_dlp  # noqa: F401
+except ImportError:
+    for venv_python in candidate_venvs:
+        if venv_python.is_file() and sys.executable != str(venv_python):
             os.execv(str(venv_python), [str(venv_python), *sys.argv])
-        break
+
+    # Auto-bootstrap if setup_env.sh exists and .venv is not present
+    setup_script = SKILL_ROOT / "scripts" / "setup_env.sh"
+    if setup_script.is_file() and not (SKILL_ROOT / ".venv").exists():
+        print("  -> Initializing porter-skill virtual environment on first run...")
+        import subprocess
+
+        subprocess.run(["bash", str(setup_script)], cwd=str(SKILL_ROOT), check=False)
+        local_venv = SKILL_ROOT / ".venv" / "bin" / "python"
+        if local_venv.is_file():
+            os.execv(str(local_venv), [str(local_venv), *sys.argv])
 
 # 2. Ensure skill repository root is on sys.path
 if str(SKILL_ROOT) not in sys.path:
