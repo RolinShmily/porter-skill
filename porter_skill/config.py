@@ -33,13 +33,14 @@ class FFmpegConfig(BaseModel):
     ffmpeg_path: str = "ffmpeg"
     ffprobe_path: str = "ffprobe"
     video_codec: str = "libx264"
-    preset: str = "medium"
+    preset: str = "veryfast"
     crf: int = 18
     pixel_format: str = "yuv420p"
     audio_codec: str = "aac"
     audio_bitrate: str = "192k"
     audio_sample_rate: int = 44100
     wav_sample_rate: int = 16000
+    auto_tune: bool = True
 
 
 class SubtitleStyleConfig(BaseModel):
@@ -54,9 +55,13 @@ class SubtitleStyleConfig(BaseModel):
     outline_color: str = "&H00000000"  # Black
     outline_width: float = 3.5
     shadow: float = 1.5
-    margin_v: int = 30
+    margin_v: int = 35
     margin_l: int = 20
     margin_r: int = 20
+    bilingual_zh_margin_v: int = 90
+    bilingual_en_margin_v: int = 35
+    fade_in_ms: int = 120
+    fade_out_ms: int = 120
 
 
 class PorterConfig(BaseModel):

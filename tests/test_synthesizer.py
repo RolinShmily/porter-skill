@@ -5,7 +5,11 @@ import subprocess
 import pytest
 
 from porter_skill.config import PorterConfig
-from porter_skill.synthesizer.burn import burn_dual_release, burn_hardsub
+from porter_skill.synthesizer.burn import (
+    burn_dual_release,
+    burn_hardsub,
+    is_valid_video_file,
+)
 from porter_skill.synthesizer.utils import escape_ffmpeg_filter_path
 
 
@@ -119,3 +123,14 @@ def test_burn_dual_release(synthetic_video_and_sub, tmp_path):
     assert res.video_zh is not None and res.video_zh.exists()
     assert res.video_bilingual.stat().st_size > 0
     assert res.video_zh.stat().st_size > 0
+
+
+def test_is_valid_video_file(synthetic_video_and_sub, tmp_path):
+    """Test video validity check with ffprobe."""
+    video_in, _, _ = synthetic_video_and_sub
+    assert is_valid_video_file(video_in) is True
+
+    # Fake corrupted file
+    bad_video = tmp_path / "corrupted.mp4"
+    bad_video.write_bytes(b"corrupted binary header without moov atom")
+    assert is_valid_video_file(bad_video) is False

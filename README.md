@@ -19,7 +19,7 @@
 底层基于平台适配器模式（Adapter Pattern）设计，当前深度适配并首期聚焦 YouTube，其余主流流媒体平台正在逐步规划支持：
 
 - [x] **YouTube** (`youtube.com`, `youtu.be`) —— 深度适配（支持 1080p/4K 分离流下载、JS 签名挑战求解、多语言原生/机翻字幕提取、反爬/大会员 Cookie 会话注入）
-- [ ] **X / Twitter** (`x.com`, `twitter.com`) —— 规划中
+- [x] **X / Twitter** (`x.com`, `twitter.com`, `t.co`) —— 深度适配（支持短链重定向秒级展开、推文标题智能清洗、1080p 视频流提取、9:16 竖屏手机画幅自适应排版）
 - [ ] **Bilibili (哔哩哔哩)** (`bilibili.com`) —— 规划中
 - [ ] **Instagram** (`instagram.com`) —— 规划中
 - [ ] **TikTok** (`tiktok.com`) —— 规划中
@@ -28,6 +28,11 @@
 
 ## 🌟 核心特性 (Key Features)
 
+- ⚡ **秒级轻量预检与短链展开 (Pre-flight Link Probe)**：
+  - 1 秒内完成 URL 重定向展开（`t.co` / `bit.ly` 等）、追踪参数清洗与视频存在性快检；
+  - 自动识别视频画幅比例（横屏 16:9 / 竖屏 9:16），提供独立探测指令 `scripts/inspect_link.py <URL>` 与 `--inspect`。
+- 📱 **画幅自适应排版 (Aspect-Ratio Aware Styling)**：
+  - 智能感知手机竖屏（9:16）与宽屏（16:9），竖屏自动适配 $\le 13$ 字意群断句与防遮挡安全底边距，横竖屏皆获得专业观影体验。
 - ⚡ **极简依赖与开箱即用**：
   - 系统底线依赖**仅需 Python (>= 3.10) 与 FFmpeg**。
   - 无需预装任何外部收费工具或复杂的本地大型 ASR 二进制。
@@ -38,12 +43,22 @@
   - 当源视频无原生字幕时，流水线按序自动尝试语音转录：
     $$\text{bijian (必剪免费)} \longrightarrow \text{jianying (剪映免费)} \longrightarrow \text{whisper-api} \longrightarrow \text{whisper-cpp}$$
   - 任一引擎遭遇网络或格式异常自动无缝切换，确保 100% 成功提取字幕。
-- 🌐 **多层次翻译与上下文语义优化**：
+- 🌐 **多层次翻译与高可用容灾**：
   - **LLM 大模型驱动（配置 API 时）**：支持 DeepSeek / OpenAI / Claude 等模型，智能断句并修正专业同音错词；
-  - **双引擎免费兜底（零配置时）**：Bing 翻译（优先） $\longrightarrow$ Google 翻译（回退），无配置亦可畅快使用。
+  - **多级免配置兜底（零配置时）**：
+    $$\text{Bing 翻译} \longrightarrow \text{Google HTTP (多端轮换/反爬伪装)} \longrightarrow \text{MyMemory 免费 API 兜底}$$
+  - **中文字符自检 (CJK Validation)**：自动检验并修复未翻译假熟肉，确保 100% 汉化成功。
+- ⚙️ **算力分级与硬件自适应极速压制**：
+  - 自动探测宿主机硬件加速与 CPU 算力（Tier A: NVENC/QSV、Tier B: 8+核多线程、Tier C: N100/树莓派低功耗工控机）；
+  - 自适应调优编码 Preset（`veryfast` / `ultrafast`）与 CRF，在低功耗轻量设备上压制提速 60%+；
+  - 媒体下载优选 1080p 规格并优先采用无损流复制（Remuxing），避免重复重编码画质损失。
+- 📝 **结构化台词本与中文意群句读 (Transcript & Chinese Phrasing)**：
+  - 自动将破碎的 ASR / 平台字幕碎片按语法、静音间隙（$>0.6\text{s}$）与标点重构成完整的英文句子台词本（`raw/transcript.json` 与 `raw/transcript.txt`）；
+  - 基于完整语句进行上下文语义翻译，杜绝碎词直译导致语序颠倒；
+  - 根据中文句读与自然连词进行意群截断（单行 $\le 20$ 字），时间戳按意群字数比例平滑分配，彻底杜绝生硬截断与阅读疲劳。
 - 🎨 **专业级排版与确定性无损压制**：
   - 中文主导排版：大号清晰中文字幕在上，自适应比例高亮英文字幕在下，单行居中不遮挡；
-  - 采用 FFmpeg `libass` 矢量渲染，视频 H.264 CRF 18 高清转码，音频 `-c:a copy` 直通复制，极速压制且音质 0 损耗。
+  - 采用 FFmpeg `libass` 矢量渲染，音频 `-c:a copy` 直通复制，极速压制且音质 0 损耗。
 - 🍪 **反爬与大会员 Cookie 自动提取**：
   - 原生支持 `--cookies-from-browser chrome/edge/firefox` 直接读取浏览器会话，轻松跨越 429 限流与年龄限制。
 
@@ -58,6 +73,8 @@ output/<video_id>_<safe_title>/
 ├── raw/                              # 【一级：原始物料区 (Raw Assets)】
 │   ├── video.mp4                     # 原始标准母版 (H.264 + AAC 广播级封装, faststart)
 │   ├── audio.wav                     # 原始基准音轨 (16kHz 16bit 单声道 WAV)
+│   ├── transcript.json               # 结构化台词本 (句级起止时间/中英双语对/原始片段映射)
+│   ├── transcript.txt                # 纯文本台词本 (带时间轴中英对照, 便于人工核对与检索)
 │   ├── subtitle.srt                  # 原始英文/源语言字幕 (长单行规整版)
 │   ├── subtitle_zh.srt (可选)        # 原始平台提取中文字幕 (若平台提供)
 │   ├── cover.jpg                     # 原始高清封面图

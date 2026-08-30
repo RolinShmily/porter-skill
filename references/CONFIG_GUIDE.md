@@ -74,5 +74,25 @@ Configurations are resolved using cascading priority (highest to lowest):
 
 1. **Pre-extracted Chinese Subtitles (Zero-Cost Fast Path)**: If the streaming platform provides a Chinese translation or auto-caption track (`zh-Hans`/`zh`), it is downloaded into `raw/subtitle_zh.srt` and aligned directly with `raw/subtitle.srt` with zero latency and zero API cost.
 2. **LLM Translation**: When `llm.api_key` or `OPENAI_API_KEY` is present, performs contextual semantic translation and subtitle optimization.
-3. **Bing Translator**: Free translation fallback.
-4. **Google Translator**: Free translation fallback (VideoCaptioner + Pure Python HTTP fallback).
+3. **Bing Translator**: Free translation fallback via VideoCaptioner.
+4. **Google Translator**: Free translation fallback (VideoCaptioner + Pure Python HTTP fallback with multi-client rotation and browser User-Agent headers).
+5. **MyMemory API**: Pure Python HTTP fallback using MyMemory API.
+6. **CJK Quality Assurance**: Built-in automated CJK detection checks if generated subtitles contain valid Chinese characters, automatically retrying fallbacks if untranslated.
+
+---
+
+## 7. Asynchronous Dual-Track Subtitles & Visual Transitions
+
+`porter-skill` employs asynchronous dual-track ASS rendering for broadcast-grade subtitle presentation:
+
+- **Asynchronous Dual-Track Independent Layers (`Layer 1: ZH`, `Layer 0: EN`)**: Chinese and English subtitles have completely decoupled timelines in ASS. The English subtitle follows natural spoken acoustic timing, while the Chinese subtitle adheres to semantic whole-sentence/phrase comprehension flow.
+- **Fixed Vertical Margin Anchoring**: The English subtitle is anchored to `bilingual_en_margin_v: 35`, and the Chinese subtitle is anchored to `bilingual_zh_margin_v: 90`. Neither track suffers from vertical jump/jitter when the other track appears, refreshes, or disappears.
+- **Smooth Alpha Fade Transitions (`\fad(120,120)`)**: Dialogue events include 120ms alpha fade-in and fade-out animations rendered natively by FFmpeg `libass`, eliminating jarring instant pop-ins while maintaining crisp readability.
+
+
+`porter-skill` automatically detects host hardware capabilities and applies adaptive tuning:
+
+- **Tier A (Hardware Acceleration)**: Detects NVIDIA NVENC (`h264_nvenc`), Intel QuickSync (`h264_qsv`), Apple VideoToolbox (`h264_videotoolbox`), or Linux VAAPI (`h264_vaapi`).
+- **Tier B (Multi-Core CPU)**: Detected when CPU cores $\ge$ 8. Uses `libx264` with `preset="veryfast"` and `crf=18` for fast, broadcast-quality encoding.
+- **Tier C (Lightweight / Edge CPU)**: Detected on low-power devices ($\le$ 4 cores, e.g. Intel N100, Raspberry Pi, entry-level VPS). Automatically switches `preset="ultrafast"` and `crf=22` for a 3x+ speedup with minimal visual impact.
+- **Lossless Stream Copy (Remuxing)**: Media stream downloads are prioritized up to 1080p and standardized via lossless container remuxing (`-c copy`) whenever streams are already H.264/AAC MP4, eliminating unnecessary re-encoding in raw material preparation.

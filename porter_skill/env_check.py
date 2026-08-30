@@ -24,6 +24,132 @@ class CheckResult:
 
 
 @dataclass
+class HardwareProfile:
+    """Hardware capability and encoding profile."""
+
+    tier: str
+    cpu_cores: int
+    hardware_accel: str | None
+    recommended_encoder: str
+    recommended_preset: str
+    recommended_crf: int
+    recommended_x264_preset: str
+    recommended_x264_crf: int
+    details: str
+
+
+def detect_hardware_profile(ffmpeg_path: str = "ffmpeg") -> HardwareProfile:
+    """
+    Detect system hardware capability and optimal FFmpeg encoding profile.
+    Tiers:
+    - Tier A: Hardware acceleration available (Intel QSV / NVIDIA NVENC / VAAPI / Apple VideoToolbox)
+    - Tier B: High-Core CPU (>= 8 cores, libx264 veryfast, CRF 18)
+    - Tier C: Lightweight CPU (<= 4 cores e.g. N100 / Raspberry Pi / low-end VPS, libx264 ultrafast, CRF 22)
+    """
+    cpu_cores = os.cpu_count() or 4
+    x264_preset = "veryfast" if cpu_cores >= 4 else "ultrafast"
+    x264_crf = 18 if cpu_cores >= 8 else (20 if cpu_cores >= 4 else 22)
+
+    encoders_output = ""
+    try:
+        proc = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-encoders"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        encoders_output = (proc.stdout or "") + (proc.stderr or "")
+    except Exception:  # noqa: BLE001, S110
+        pass
+
+    sys_name = platform.system()
+    has_dri = Path("/dev/dri").exists()
+
+    # 1. NVIDIA NVENC
+    if "h264_nvenc" in encoders_output:
+        return HardwareProfile(
+            tier="Tier A (NVIDIA NVENC Hardware Accelerated)",
+            cpu_cores=cpu_cores,
+            hardware_accel="nvenc",
+            recommended_encoder="h264_nvenc",
+            recommended_preset="p4",
+            recommended_crf=19,
+            recommended_x264_preset=x264_preset,
+            recommended_x264_crf=x264_crf,
+            details=f"NVIDIA NVENC detected ({cpu_cores} CPU cores)",
+        )
+
+    # 2. Intel QuickSync (QSV)
+    if "h264_qsv" in encoders_output and (has_dri or sys_name == "Windows"):
+        return HardwareProfile(
+            tier="Tier A (Intel QuickSync QSV Hardware Accelerated)",
+            cpu_cores=cpu_cores,
+            hardware_accel="qsv",
+            recommended_encoder="h264_qsv",
+            recommended_preset="veryfast",
+            recommended_crf=20,
+            recommended_x264_preset=x264_preset,
+            recommended_x264_crf=x264_crf,
+            details=f"Intel QSV detected ({cpu_cores} CPU cores, GPU render device available)",
+        )
+
+    # 3. Apple VideoToolbox (macOS)
+    if "h264_videotoolbox" in encoders_output and sys_name == "Darwin":
+        return HardwareProfile(
+            tier="Tier A (Apple VideoToolbox Hardware Accelerated)",
+            cpu_cores=cpu_cores,
+            hardware_accel="videotoolbox",
+            recommended_encoder="h264_videotoolbox",
+            recommended_preset="medium",
+            recommended_crf=20,
+            recommended_x264_preset=x264_preset,
+            recommended_x264_crf=x264_crf,
+            details=f"Apple Silicon / VideoToolbox detected ({cpu_cores} CPU cores)",
+        )
+
+    # 4. Linux VAAPI
+    if "h264_vaapi" in encoders_output and has_dri:
+        return HardwareProfile(
+            tier="Tier A (Linux VAAPI Hardware Accelerated)",
+            cpu_cores=cpu_cores,
+            hardware_accel="vaapi",
+            recommended_encoder="h264_vaapi",
+            recommended_preset="veryfast",
+            recommended_crf=20,
+            recommended_x264_preset=x264_preset,
+            recommended_x264_crf=x264_crf,
+            details=f"Linux VAAPI /dev/dri detected ({cpu_cores} CPU cores)",
+        )
+
+    # 5. Software CPU Fallback: High-Core (Tier B) vs Lightweight (Tier C)
+    if cpu_cores >= 8:
+        return HardwareProfile(
+            tier=f"Tier B (High-Core CPU: {cpu_cores} Cores)",
+            cpu_cores=cpu_cores,
+            hardware_accel=None,
+            recommended_encoder="libx264",
+            recommended_preset="veryfast",
+            recommended_crf=18,
+            recommended_x264_preset=x264_preset,
+            recommended_x264_crf=x264_crf,
+            details=f"Multi-threaded CPU software encoding ({cpu_cores} cores, preset=veryfast, crf=18)",
+        )
+
+    return HardwareProfile(
+        tier=f"Tier C (Lightweight CPU: {cpu_cores} Cores - Low Power / Edge)",
+        cpu_cores=cpu_cores,
+        hardware_accel=None,
+        recommended_encoder="libx264",
+        recommended_preset="ultrafast",
+        recommended_crf=22,
+        recommended_x264_preset=x264_preset,
+        recommended_x264_crf=x264_crf,
+        details=f"Lightweight CPU software encoding ({cpu_cores} cores, preset=ultrafast, crf=22 for 3x speedup)",
+    )
+
+
+@dataclass
 class DoctorReport:
     """Aggregated doctor diagnostic report."""
 
@@ -294,11 +420,27 @@ def check_llm() -> CheckResult:
     )
 
 
+def check_hardware() -> CheckResult:
+    """Check hardware encoding profile and device capability tier."""
+    profile = detect_hardware_profile()
+    return CheckResult(
+        name="Hardware & Acceleration",
+        status=True,
+        message=profile.tier,
+        details=(
+            f"Encoder: {profile.recommended_encoder} | "
+            f"Preset: {profile.recommended_preset} | "
+            f"CRF: {profile.recommended_crf}"
+        ),
+    )
+
+
 def run_doctor() -> DoctorReport:
     """Execute all diagnostic checks and return comprehensive report."""
     results = [
         check_python(),
         check_ffmpeg(),
+        check_hardware(),
         check_packages(),
         check_llm(),
     ]

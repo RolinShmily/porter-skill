@@ -19,6 +19,9 @@ class VideoMetadata:
     uploader: str | None = None
     channel: str | None = None
     duration: float | None = None
+    width: int | None = None
+    height: int | None = None
+    is_vertical: bool = False
     description: str | None = None
     thumbnail_url: str | None = None
     has_official_subtitle: bool = False

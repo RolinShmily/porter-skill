@@ -21,7 +21,11 @@
     "outline_color": "&H00000000",
     "outline_width": 3.5,
     "shadow": 1.5,
-    "margin_v": 30
+    "margin_v": 35,
+    "bilingual_zh_margin_v": 90,
+    "bilingual_en_margin_v": 35,
+    "fade_in_ms": 120,
+    "fade_out_ms": 120
   },
   "cookies_browser": "",
   "cookies_file": ""

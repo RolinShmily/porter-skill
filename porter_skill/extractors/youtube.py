@@ -233,113 +233,192 @@ class YouTubeExtractor(BasePlatformExtractor):
             },
         )
 
-        # 2. Download media streams to temp_dir
-        raw_download_template = str(temp_dir / "download.%(ext)s")
-        ydl_opts_download: dict[str, Any] = {
-            "format": "bestvideo+bestaudio/best",
-            "outtmpl": raw_download_template,
-            "merge_output_format": "mkv",  # intermediate container
-            "remote_components": {"ejs": "github"},
-            "quiet": False,
-            "no_warnings": True,
-            "overwrites": True,
-            "extractor_args": {"youtube": {"player_client": player_clients}},
-        }
-        if cookies_file:
-            ydl_opts_download["cookiefile"] = cookies_file
-        if cookies_browser:
-            ydl_opts_download["cookiesfrombrowser"] = (cookies_browser,)
-
-        # Request source subtitles and Chinese subtitles if available
-        requested_subs: list[str] = []
-        if chosen_source_lang:
-            requested_subs.append(chosen_source_lang)
-        if chosen_zh_lang and chosen_zh_lang != chosen_source_lang:
-            requested_subs.append(chosen_zh_lang)
-
-        if requested_subs:
-            if official_source_lang or official_zh_lang:
-                ydl_opts_download["writesubtitles"] = True
-            if auto_source_lang or auto_zh_lang:
-                ydl_opts_download["writeautomaticsub"] = True
-            ydl_opts_download["subtitleslangs"] = requested_subs
-            ydl_opts_download["subtitlesformat"] = "srt/vtt/best"
-
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
-                ydl.download([url])
-        except Exception as e:  # noqa: BLE001
-            print(f"  [WARN] Initial download with subtitles encountered issue: {e}")
-            print("  -> Retrying download without subtitles (will use ASR fallback)...")
-            ydl_opts_retry = dict(ydl_opts_download)
-            ydl_opts_retry.pop("writesubtitles", None)
-            ydl_opts_retry.pop("writeautomaticsub", None)
-            ydl_opts_retry.pop("subtitleslangs", None)
-            ydl_opts_retry.pop("subtitlesformat", None)
-            with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl:
-                ydl.download([url])
-
-        # Find downloaded video in temp_dir
-        downloaded_files = list(temp_dir.glob("download.*"))
-        downloaded_video = None
-        for f in downloaded_files:
-            if f.suffix.lower() in [".mkv", ".mp4", ".webm", ".ts", ".flv", ".mov"]:
-                downloaded_video = f
-                break
-
-        if not downloaded_video or not downloaded_video.exists():
-            raise RuntimeError(f"Download failed: video file not found in {temp_dir}")
-
-        # 3. Transcode to standardized raw/video.mp4 (H.264 High Profile + AAC 192k + yuv420p + faststart)
+        # Check if raw materials already exist and are valid from a prior run (Resumption)
         standard_video_path = raw_dir / "video.mp4"
-        transcode_cmd = [
-            ffmpeg_path,
-            "-y",
-            "-i",
-            str(downloaded_video),
-            "-c:v",
-            "libx264",
-            "-profile:v",
-            "high",
-            "-preset",
-            "medium",
-            "-crf",
-            "18",
-            "-pix_fmt",
-            "yuv420p",
-            "-c:a",
-            "aac",
-            "-b:a",
-            "192k",
-            "-ar",
-            "44100",
-            "-movflags",
-            "+faststart",
-            str(standard_video_path),
-        ]
-        proc = subprocess.run(transcode_cmd, capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
-            raise RuntimeError(f"FFmpeg standardization failed:\n{proc.stderr}")
-
-        # 4. Extract 16kHz 16bit mono WAV: raw/audio.wav
         standard_audio_path = raw_dir / "audio.wav"
-        wav_cmd = [
-            ffmpeg_path,
-            "-y",
-            "-i",
-            str(standard_video_path),
-            "-vn",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            str(standard_audio_path),
-        ]
-        proc_wav = subprocess.run(wav_cmd, capture_output=True, text=True, check=False)
-        if proc_wav.returncode != 0:
-            raise RuntimeError(f"Audio extraction failed:\n{proc_wav.stderr}")
+        metadata_path = raw_dir / "metadata.json"
+        ffprobe_path = shutil.which("ffprobe") or "ffprobe"
+
+        already_extracted = (
+            standard_video_path.is_file()
+            and standard_video_path.stat().st_size > 1024
+            and standard_audio_path.is_file()
+            and standard_audio_path.stat().st_size > 1024
+        )
+
+        if not already_extracted:
+            # 2. Download subtitles and media streams to temp_dir (Decoupled for robustness)
+            raw_download_template = str(temp_dir / "download.%(ext)s")
+
+            # 2a. Attempt subtitle download independently per language
+            requested_subs: list[str] = []
+            if chosen_source_lang:
+                requested_subs.append(chosen_source_lang)
+            if chosen_zh_lang and chosen_zh_lang != chosen_source_lang:
+                requested_subs.append(chosen_zh_lang)
+
+            if requested_subs:
+                for sub_lang in requested_subs:
+                    ydl_opts_sub: dict[str, Any] = {
+                        "skip_download": True,
+                        "writesubtitles": bool(official_source_lang or official_zh_lang),
+                        "writeautomaticsub": bool(auto_source_lang or auto_zh_lang),
+                        "subtitleslangs": [sub_lang],
+                        "subtitlesformat": "srt/vtt/best",
+                        "outtmpl": raw_download_template,
+                        "remote_components": {"ejs": "github"},
+                        "quiet": True,
+                        "no_warnings": True,
+                        "ignoreerrors": True,
+                        "extractor_args": {"youtube": {"player_client": player_clients}},
+                    }
+                    if cookies_file:
+                        ydl_opts_sub["cookiefile"] = cookies_file
+                    if cookies_browser:
+                        ydl_opts_sub["cookiesfrombrowser"] = (cookies_browser,)
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts_sub) as ydl:
+                            ydl.download([url])
+                    except Exception as e:  # noqa: BLE001
+                        print(f"  [WARN] Subtitle download for {sub_lang} failed: {e}")
+
+            # 2b. Download media streams independently (Cap at 1080p for optimal quality vs speed balance)
+            format_spec = (
+                "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
+                "bestvideo[height<=1080]+bestaudio/"
+                "best[height<=1080]/best"
+            )
+            ydl_opts_download: dict[str, Any] = {
+                "format": format_spec,
+                "outtmpl": raw_download_template,
+                "merge_output_format": "mp4",
+                "remote_components": {"ejs": "github"},
+                "quiet": False,
+                "no_warnings": True,
+                "overwrites": True,
+                "extractor_args": {"youtube": {"player_client": player_clients}},
+            }
+            if cookies_file:
+                ydl_opts_download["cookiefile"] = cookies_file
+            if cookies_browser:
+                ydl_opts_download["cookiesfrombrowser"] = (cookies_browser,)
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
+                    ydl.download([url])
+            except Exception as e:  # noqa: BLE001
+                print(f"  [WARN] Standard media download encountered issue: {e}")
+                print("  -> Retrying media download with Android client...")
+                ydl_opts_retry = dict(ydl_opts_download)
+                ydl_opts_retry["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+                with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl:
+                    ydl.download([url])
+
+            # Find downloaded video in temp_dir
+            downloaded_files = list(temp_dir.glob("download.*"))
+            downloaded_video = None
+            for f in downloaded_files:
+                if f.suffix.lower() in [".mkv", ".mp4", ".webm", ".ts", ".flv", ".mov"]:
+                    downloaded_video = f
+                    break
+
+            if not downloaded_video or not downloaded_video.exists():
+                raise RuntimeError(f"Download failed: video file not found in {temp_dir}")
+
+            # 3. Standardize to raw/video.mp4 (Fast stream copy if already H.264/AAC MP4, else fast transcode)
+            is_h264_aac = False
+            try:
+                probe_cmd = [
+                    ffprobe_path,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "stream=codec_name,codec_type",
+                    "-of",
+                    "json",
+                    str(downloaded_video),
+                ]
+                probe_proc = subprocess.run(probe_cmd, capture_output=True, text=True, check=False)
+                if probe_proc.returncode == 0:
+                    probe_data = json.loads(probe_proc.stdout)
+                    streams = probe_data.get("streams", [])
+                    v_codecs = [
+                        s.get("codec_name") for s in streams if s.get("codec_type") == "video"
+                    ]
+                    a_codecs = [
+                        s.get("codec_name") for s in streams if s.get("codec_type") == "audio"
+                    ]
+                    if (
+                        v_codecs
+                        and v_codecs[0] in ["h264", "avc1"]
+                        and a_codecs
+                        and a_codecs[0] == "aac"
+                    ):
+                        is_h264_aac = True
+            except Exception:  # noqa: BLE001, S110
+                pass
+
+            if is_h264_aac and downloaded_video.suffix.lower() == ".mp4":
+                transcode_cmd = [
+                    ffmpeg_path,
+                    "-y",
+                    "-i",
+                    str(downloaded_video),
+                    "-c",
+                    "copy",
+                    "-movflags",
+                    "+faststart",
+                    str(standard_video_path),
+                ]
+            else:
+                transcode_cmd = [
+                    ffmpeg_path,
+                    "-y",
+                    "-i",
+                    str(downloaded_video),
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "18",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "192k",
+                    "-ar",
+                    "44100",
+                    "-movflags",
+                    "+faststart",
+                    str(standard_video_path),
+                ]
+
+            proc = subprocess.run(transcode_cmd, capture_output=True, text=True, check=False)
+            if proc.returncode != 0:
+                raise RuntimeError(f"FFmpeg standardization failed:\n{proc.stderr}")
+
+            # 4. Extract 16kHz 16bit mono WAV: raw/audio.wav
+            wav_cmd = [
+                ffmpeg_path,
+                "-y",
+                "-i",
+                str(standard_video_path),
+                "-vn",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(standard_audio_path),
+            ]
+            proc_wav = subprocess.run(wav_cmd, capture_output=True, text=True, check=False)
+            if proc_wav.returncode != 0:
+                raise RuntimeError(f"Audio extraction failed:\n{proc_wav.stderr}")
+        else:
+            print(f"  ✓ Reusing existing standardized raw video and audio: {raw_dir}")
 
         # 5. Handle Cover Art: raw/cover.jpg
         cover_path = raw_dir / "cover.jpg"
@@ -384,6 +463,24 @@ class YouTubeExtractor(BasePlatformExtractor):
 
         if chosen_zh_lang:
             subtitle_zh_path = _save_sub(chosen_zh_lang, "subtitle_zh.srt")
+
+        # Rescue any downloaded subtitle file if exact language tag match missed
+        if not subtitle_path:
+            for sf in temp_dir.glob("download*.*"):
+                if sf.suffix.lower() in [".srt", ".vtt"] and not any(
+                    zh_code in sf.name.lower()
+                    for zh_code in ["zh-hans", "zh-hant", "zh-cn", "zh-tw"]
+                ):
+                    dest = raw_dir / "subtitle.srt"
+                    if sf.suffix.lower() == ".srt":
+                        dest.write_text(
+                            sf.read_text(encoding="utf-8", errors="replace"), encoding="utf-8"
+                        )
+                    else:
+                        vtt_text = sf.read_text(encoding="utf-8", errors="replace")
+                        dest.write_text(_convert_vtt_to_srt(vtt_text), encoding="utf-8")
+                    subtitle_path = dest
+                    break
 
         # 7. Save metadata JSON
         metadata_path = raw_dir / "metadata.json"

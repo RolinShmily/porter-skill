@@ -83,5 +83,25 @@ def test_doctor_guides_content():
 def test_run_doctor():
     """Verify run_doctor aggregates all checks."""
     report = run_doctor()
-    assert len(report.results) >= 4
+    assert len(report.results) >= 5
     assert report.system == platform.system()
+
+
+def test_detect_hardware_profile():
+    """Verify hardware profile detection for hardware acceleration vs CPU tiers."""
+    from porter_skill.env_check import check_hardware, detect_hardware_profile
+
+    profile = detect_hardware_profile()
+    assert profile.cpu_cores > 0
+    assert profile.recommended_encoder in [
+        "libx264",
+        "h264_qsv",
+        "h264_nvenc",
+        "h264_vaapi",
+        "h264_videotoolbox",
+    ]
+    assert profile.recommended_preset in ["veryfast", "ultrafast", "medium", "p4"]
+
+    hw_check = check_hardware()
+    assert hw_check.status is True
+    assert "Hardware" in hw_check.name

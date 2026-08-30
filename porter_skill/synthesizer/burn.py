@@ -1,10 +1,12 @@
 """FFmpeg fast hardsub synthesis module for dual-version release."""
 
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
 from porter_skill.config import FFmpegConfig, PorterConfig, get_default_config
+from porter_skill.env_check import detect_hardware_profile
 from porter_skill.synthesizer.utils import escape_ffmpeg_filter_path
 
 
@@ -14,6 +16,40 @@ class DualReleaseResult:
 
     video_bilingual: Path | None = None
     video_zh: Path | None = None
+
+
+def is_valid_video_file(video_path: Path, ffprobe_path: str = "ffprobe") -> bool:
+    """
+    Check if a video file exists, is non-empty, and has valid moov atom / duration via ffprobe.
+    Prevents half-written / interrupted files from being mistaken as completed.
+    """
+    path = Path(video_path)
+    if not path.is_file() or path.stat().st_size < 1024:
+        return False
+    resolved_ffprobe = shutil.which(ffprobe_path) or ffprobe_path
+    try:
+        res = subprocess.run(
+            [
+                resolved_ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            duration = float(res.stdout.strip())
+            return duration > 0
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return False
 
 
 def _ensure_fontconfig_configured() -> None:
@@ -61,6 +97,7 @@ def burn_hardsub(
 ) -> Path:
     """
     Burn ASS or SRT subtitle into video with -c:a copy and faststart.
+    Employs atomic temporary file writes to prevent corrupted outputs on interruptions.
     """
     _ensure_fontconfig_configured()
     if ffmpeg_config is None:
@@ -70,6 +107,16 @@ def burn_hardsub(
     subtitle_path = Path(subtitle_path)
     video_output = Path(video_output)
     video_output.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check if target file already exists and is completely valid
+    if video_output.is_file() and is_valid_video_file(video_output, ffmpeg_config.ffprobe_path):
+        print(f"  ✓ Reusing existing valid release video: {video_output.name}")
+        return video_output
+
+    # Use atomic temporary destination
+    temp_output = video_output.with_name(f".tmp_{video_output.name}")
+    if temp_output.exists():
+        temp_output.unlink(missing_ok=True)
 
     escaped_sub = escape_ffmpeg_filter_path(subtitle_path)
     font_dir = get_font_dir()
@@ -82,6 +129,17 @@ def burn_hardsub(
         else f"subtitles='{escaped_sub}'{fontsdir_opt}"
     )
 
+    # Determine adaptive codec and tuning options
+    codec = ffmpeg_config.video_codec
+    preset = ffmpeg_config.preset
+    crf = ffmpeg_config.crf
+    pix_fmt = ffmpeg_config.pixel_format
+
+    if ffmpeg_config.auto_tune and codec == "libx264":
+        profile = detect_hardware_profile(ffmpeg_config.ffmpeg_path)
+        preset = profile.recommended_x264_preset
+        crf = profile.recommended_x264_crf
+
     cmd = [
         ffmpeg_config.ffmpeg_path,
         "-y",
@@ -90,18 +148,18 @@ def burn_hardsub(
         "-vf",
         filter_expr,
         "-c:v",
-        ffmpeg_config.video_codec,
+        codec,
         "-preset",
-        ffmpeg_config.preset,
+        preset,
         "-crf",
-        str(ffmpeg_config.crf),
+        str(crf),
         "-pix_fmt",
-        ffmpeg_config.pixel_format,
+        pix_fmt,
         "-c:a",
         "copy",
         "-movflags",
         "+faststart",
-        str(video_output),
+        str(temp_output),
     ]
 
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -118,28 +176,38 @@ def burn_hardsub(
                 "-vf",
                 f"subtitles='{escaped_srt}'",
                 "-c:v",
-                ffmpeg_config.video_codec,
+                codec,
                 "-preset",
-                ffmpeg_config.preset,
+                preset,
                 "-crf",
-                str(ffmpeg_config.crf),
+                str(crf),
                 "-pix_fmt",
-                ffmpeg_config.pixel_format,
+                pix_fmt,
                 "-c:a",
                 "copy",
                 "-movflags",
                 "+faststart",
-                str(video_output),
+                str(temp_output),
             ]
             proc_fb = subprocess.run(cmd_fallback, capture_output=True, text=True, check=False)
-            if proc_fb.returncode == 0 and video_output.exists():
+            if proc_fb.returncode == 0 and temp_output.exists():
+                temp_output.replace(video_output)
                 return video_output
+
+        # Clean up temporary corrupt file
+        if temp_output.exists():
+            temp_output.unlink(missing_ok=True)
 
         raise RuntimeError(
             f"FFmpeg hardsub burning failed for {subtitle_path.name}:\n{proc.stderr}"
         )
 
-    return video_output
+    # Validate output file integrity before atomic replacement
+    if temp_output.exists():
+        temp_output.replace(video_output)
+        return video_output
+
+    raise RuntimeError(f"FFmpeg completed but output file not found: {video_output.name}")
 
 
 def burn_dual_release(

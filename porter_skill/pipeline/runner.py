@@ -8,6 +8,7 @@ from pathlib import Path
 from porter_skill.config import PorterConfig, get_default_config
 from porter_skill.env_check import run_doctor
 from porter_skill.extractors.base import RawMaterialResult, get_extractor
+from porter_skill.extractors.inspector import inspect_url
 from porter_skill.subtitle.controller import SubtitleResult, generate_subtitles
 from porter_skill.synthesizer.burn import DualReleaseResult, burn_dual_release
 
@@ -53,7 +54,7 @@ def run_pipeline(
             on_progress(step_name, step_num)
         print(f"[Phase {step_num}/4] {step_name}...")
 
-    # Phase 0: Environment validation
+    # Phase 0: Environment validation & Pre-flight Link Inspection
     report = run_doctor()
     if not report.passed:
         failing = [r.name for r in report.results if not r.status and not r.is_warning]
@@ -61,11 +62,33 @@ def run_pipeline(
             f"Environment check failed for: {', '.join(failing)}. Run --doctor for fixes."
         )
 
+    # Pre-flight link probe
+    inspection = inspect_url(
+        url,
+        cookies_file=config.cookies_file,
+        cookies_browser=config.cookies_browser,
+    )
+    if not inspection.is_valid:
+        raise RuntimeError(
+            f"Link pre-flight check failed for URL: {url}\nReason: {inspection.error_message}"
+        )
+
+    if inspection.duration_seconds and inspection.duration_seconds > 300:
+        mins = inspection.duration_seconds / 60.0
+        print(f"  ℹ Long video detected ({mins:.1f} min). Checkpointing & adaptive tuning enabled.")
+
+    if inspection.is_vertical:
+        print(
+            "  📱 Vertical video format detected (9:16). Applying mobile-optimized subtitle scaling."
+        )
+
+    target_url = inspection.canonical_url
+
     # Phase 1: Material extraction
-    log(f"Extracting raw materials from URL: {url}", 1)
-    extractor = get_extractor(url)
+    log(f"Extracting raw materials from URL: {target_url}", 1)
+    extractor = get_extractor(target_url)
     raw_result = extractor.extract_raw_materials(
-        url=url,
+        url=target_url,
         output_base_dir=output_base_dir,
         ffmpeg_path=config.ffmpeg.ffmpeg_path,
         cookies_file=config.cookies_file,

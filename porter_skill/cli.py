@@ -12,6 +12,7 @@ from porter_skill.config import (
     save_config_key,
 )
 from porter_skill.env_check import print_doctor_report, run_doctor
+from porter_skill.extractors.inspector import inspect_url
 from porter_skill.pipeline.runner import run_pipeline
 
 
@@ -60,7 +61,13 @@ def main() -> int:
     parser.add_argument(
         "url",
         nargs="?",
-        help="YouTube video URL to download and localize.",
+        help="Streaming video URL (YouTube, X/Twitter, etc.) to download and localize.",
+    )
+    parser.add_argument(
+        "-i",
+        "--inspect",
+        action="store_true",
+        help="Run lightweight pre-flight probe on video URL to inspect platform, metadata, and validity without downloading.",
     )
     parser.add_argument(
         "-o",
@@ -172,7 +179,9 @@ def main() -> int:
 
     if not args.url:
         parser.print_help()
-        print("\nError: Please provide a video URL or run with --doctor / --config-show.")
+        print(
+            "\nError: Please provide a video URL or run with --doctor / --config-show / --inspect."
+        )
         return 1
 
     config = get_default_config(args.config)
@@ -194,6 +203,15 @@ def main() -> int:
         config.cookies_file = args.cookies
     if args.cookies_from_browser:
         config.cookies_browser = args.cookies_from_browser
+
+    if args.inspect:
+        res = inspect_url(
+            args.url,
+            cookies_file=config.cookies_file,
+            cookies_browser=config.cookies_browser,
+        )
+        print(res.format_summary())
+        return 0 if res.is_valid else 1
 
     try:
         run_pipeline(

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 from porter_skill.cli import main
 from porter_skill.extractors.base import RawMaterialResult, VideoMetadata
+from porter_skill.extractors.inspector import InspectionResult
 from porter_skill.pipeline.runner import run_pipeline
 from porter_skill.subtitle.controller import SubtitleResult
 from porter_skill.subtitle.formatter import SubtitleItem
@@ -100,9 +101,19 @@ Dialogue: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,Hello
     )
 
     with (
+        patch("porter_skill.pipeline.runner.inspect_url") as mock_inspect,
         patch("porter_skill.pipeline.runner.get_extractor") as mock_get_ext,
         patch("porter_skill.pipeline.runner.generate_subtitles") as mock_gen_sub,
     ):
+        mock_inspect.return_value = InspectionResult(
+            input_url="https://www.youtube.com/watch?v=vid123",
+            canonical_url="https://www.youtube.com/watch?v=vid123",
+            platform="youtube",
+            is_valid=True,
+            has_video=True,
+            video_id="vid123",
+            title="Test Video",
+        )
         mock_extractor = MagicMock()
         mock_extractor.extract_raw_materials.return_value = mock_raw_result
         mock_get_ext.return_value = mock_extractor
@@ -138,3 +149,22 @@ def test_cli_no_args(capsys):
         assert exit_code == 1
         captured = capsys.readouterr()
         assert "Error: Please provide a video URL or run with --doctor" in captured.out
+
+
+def test_cli_inspect():
+    """Test CLI -i / --inspect flag invocation."""
+    with (
+        patch("sys.argv", ["porter", "https://x.com/user/status/123", "--inspect"]),
+        patch("porter_skill.cli.inspect_url") as mock_insp,
+    ):
+        mock_insp.return_value = InspectionResult(
+            input_url="https://x.com/user/status/123",
+            canonical_url="https://x.com/user/status/123",
+            platform="x",
+            is_valid=True,
+            has_video=True,
+            video_id="123",
+            title="Test Post",
+        )
+        exit_code = main()
+        assert exit_code == 0
