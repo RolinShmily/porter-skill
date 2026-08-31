@@ -153,15 +153,8 @@ def burn_hardsub(
         temp_output.unlink(missing_ok=True)
 
     escaped_sub = escape_ffmpeg_filter_path(subtitle_path)
-    font_dir = get_font_dir()
-    fontsdir_opt = f":fontsdir='{escape_ffmpeg_filter_path(font_dir)}'" if font_dir else ""
-
     is_ass = subtitle_path.suffix.lower() == ".ass"
-    filter_expr = (
-        f"ass='{escaped_sub}'{fontsdir_opt}"
-        if is_ass
-        else f"subtitles='{escaped_sub}'{fontsdir_opt}"
-    )
+    filter_expr = f"ass='{escaped_sub}'" if is_ass else f"subtitles='{escaped_sub}'"
 
     # Determine adaptive codec and tuning options
     codec = ffmpeg_config.video_codec

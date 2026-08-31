@@ -12,7 +12,11 @@ import requests
 from openai import OpenAI
 
 from porter_skill.config import PorterConfig
-from porter_skill.subtitle.formatter import SubtitleItem, TranscriptSentence
+from porter_skill.subtitle.formatter import (
+    SubtitleItem,
+    TranscriptSentence,
+    restore_english_punctuation_heuristic,
+)
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -92,12 +96,13 @@ def translate_sentences_with_bing_http(
                     parts = [p.strip() for p in trans_text.split(delimiter) if p.strip()]
                     if len(parts) == len(batch):
                         for idx, s in enumerate(batch):
+                            en_text = restore_english_punctuation_heuristic(s.en_text)
                             translated_sentences.append(
                                 TranscriptSentence(
                                     sentence_id=s.sentence_id,
                                     start_ms=s.start_ms,
                                     end_ms=s.end_ms,
-                                    en_text=s.en_text,
+                                    en_text=en_text,
                                     zh_text=parts[idx].strip() if parts[idx].strip() else s.en_text,
                                     fragment_indices=s.fragment_indices,
                                 )
@@ -480,12 +485,14 @@ def translate_sentences_with_direct_llm(
                 }
                 for s in batch:
                     ref_en, ref_zh = trans_map.get(s.sentence_id, ("", ""))
+                    final_en = ref_en.strip() if ref_en.strip() else s.en_text
+                    final_en = restore_english_punctuation_heuristic(final_en)
                     translated_sentences.append(
                         TranscriptSentence(
                             sentence_id=s.sentence_id,
                             start_ms=s.start_ms,
                             end_ms=s.end_ms,
-                            en_text=ref_en.strip() if ref_en.strip() else s.en_text,
+                            en_text=final_en,
                             zh_text=ref_zh.strip() if ref_zh.strip() else s.zh_text,
                             fragment_indices=s.fragment_indices,
                         )

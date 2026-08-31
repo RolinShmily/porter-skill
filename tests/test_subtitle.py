@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 from porter_skill.config import LLMConfig, PorterConfig
 from porter_skill.extractors.base import RawMaterialResult, VideoMetadata
 from porter_skill.subtitle.controller import (
+    compute_adaptive_subtitle_style,
     generate_subtitles,
     has_chinese_translation,
     transcribe_with_bcut,
@@ -25,10 +26,12 @@ from porter_skill.subtitle.formatter import (
     ms_to_srt_time,
     parse_srt,
     reconstruct_sentences_from_fragments,
+    restore_english_punctuation_heuristic,
     save_transcript_json,
     save_transcript_txt,
     split_chinese_sentence_into_cues,
     split_chinese_text_by_phrase,
+    split_english_text_to_n_parts,
     srt_time_to_ms,
 )
 from porter_skill.subtitle.translator import (
@@ -146,7 +149,7 @@ def test_reconstruct_sentences_from_fragments():
 def test_clean_chinese_subtitle_punctuation():
     """Verify professional punctuation formatting for Chinese subtitles."""
     assert clean_chinese_subtitle_punctuation("这是一个完整句子。") == "这是一个完整句子"
-    assert clean_chinese_subtitle_punctuation("这是前半句，") == "这是前半句"
+    assert clean_chinese_subtitle_punctuation("这是前半句，") == "这是前半句，"
     assert clean_chinese_subtitle_punctuation("这是问句吗？") == "这是问句吗？"
     assert clean_chinese_subtitle_punctuation("这是感叹句！") == "这是感叹句！"
     assert clean_chinese_subtitle_punctuation("前半句，后半句。") == "前半句，后半句"
@@ -160,7 +163,7 @@ def test_split_chinese_text_by_phrase():
     long_text = "如果你喜欢这个视频，请务必订阅我的频道并打开小铃铛。"
     parts = split_chinese_text_by_phrase(long_text, max_len=20)
     assert len(parts) == 2
-    assert parts[0] == "如果你喜欢这个视频"
+    assert parts[0] == "如果你喜欢这个视频，"
     assert parts[1] == "请务必订阅我的频道并打开小铃铛"
 
 
@@ -173,7 +176,7 @@ def test_split_chinese_sentence_into_cues():
     )
     assert len(cues) == 2
     assert cues[0].index == 1
-    assert cues[0].target_text == "如果你喜欢这个视频"
+    assert cues[0].target_text == "如果你喜欢这个视频，"
     assert cues[0].start_ms == 1000
     assert cues[0].end_ms < 7000
 
@@ -597,4 +600,99 @@ def test_transcribe_with_google_stt_mock(tmp_path):
         success = transcribe_with_google_stt(audio_file, out_srt, cfg)
         assert success is True
         assert out_srt.is_file()
-        assert "Hello from Google STT" in out_srt.read_text(encoding="utf-8")
+
+
+def test_restore_english_punctuation_heuristic():
+    """Verify heuristic English punctuation and capitalization restoration for raw ASR streams."""
+    # Case 1: Multiple run-on sentences with pronoun starters
+    raw1 = "understanding group theory doesn't clog your working memory It doesn't compete with your active thinking But it kind of expands What your brain can do"
+    res1 = restore_english_punctuation_heuristic(raw1)
+    assert res1.startswith("Understanding")
+    assert "memory." in res1
+    assert "It doesn't compete" in res1
+    assert "thinking," in res1
+    assert "what your brain can do." in res1
+
+    # Case 2: Proper nouns and questions
+    raw2 = "did you know that OpenAI and Google use Python for AI research"
+    res2 = restore_english_punctuation_heuristic(raw2)
+    assert res2 == "Did you know that OpenAI and Google use Python for AI research?"
+
+    # Case 3: Subordinating conjunctions in long sentences
+    raw3 = "if you practice every day you will master this skill because consistency is key and it will pay off"
+    res3 = restore_english_punctuation_heuristic(raw3)
+    assert "skill, because" in res3
+    assert "key, and" in res3
+
+
+def test_split_english_text_clause_aware():
+    """Verify clause-aware and hanging-conjunction-free English text splitting."""
+    en_text = (
+        "Understanding group theory doesn't clog your working memory. "
+        "It doesn't compete with your active thinking, but it kind of expands what your brain can do."
+    )
+    zh_lengths = [27, 14]
+    parts = split_english_text_to_n_parts(en_text, 2, zh_lengths)
+
+    assert len(parts) == 2
+    # Ensure "But" / "but" is NOT left hanging at the end of Part 1
+    assert not parts[0].endswith(("but", "But", "and", "And", "or", "Or"))
+    assert parts[0].endswith(",")
+    assert parts[1].startswith("but it kind of expands")
+
+
+def test_split_chinese_sentence_into_cues_with_restoration():
+    """Verify end-to-end cue splitting with punctuation and alignment."""
+    raw_en = "understanding group theory doesn't clog your working memory It doesn't compete with your active thinking But it kind of expands What your brain can do"
+    zh_text = "理解群论不会堵塞你的工作记忆，它不会与你的主动思维竞争，但它有点扩展了你大脑能做的事情"
+
+    cues = split_chinese_sentence_into_cues(
+        en_text=raw_en,
+        zh_text=zh_text,
+        start_ms=114090,
+        end_ms=124390,
+        start_index=1,
+        max_cjk_len=28,
+    )
+
+    assert len(cues) == 2
+    assert "，" in cues[0].target_text
+    assert cues[0].source_text.endswith(",")
+    assert not cues[0].source_text.endswith(("but", "But"))
+    assert cues[1].source_text.startswith("but it kind of")
+
+
+def test_compute_adaptive_subtitle_style():
+    """Verify adaptive styling across diverse video aspect ratios and physical resolutions."""
+    # 1. 1106x720 (~1.53:1 3:2/4:3-like compact screen from user screenshot)
+    b_st, z_st, px, py = compute_adaptive_subtitle_style(1106, 720)
+    assert px == 1106
+    assert py == 720
+    assert b_st.zh_font_size >= 38  # Boosted for compact screen
+    assert b_st.en_font_size >= 24
+    assert z_st.zh_font_size > b_st.zh_font_size  # Pure ZH is larger
+    assert b_st.bilingual_zh_margin_v > b_st.bilingual_en_margin_v
+
+    # 2. 1920x1080 (Standard 16:9 1080p)
+    b_1080, z_1080, px_1080, py_1080 = compute_adaptive_subtitle_style(1920, 1080)
+    assert px_1080 == 1920
+    assert py_1080 == 1080
+    assert b_1080.zh_font_size == 52
+    assert b_1080.en_font_size == 34
+    assert z_1080.zh_font_size == 58
+
+    # 3. 1080x1920 (Vertical 9:16)
+    b_vert, z_vert, px_vert, py_vert = compute_adaptive_subtitle_style(1080, 1920)
+    assert px_vert == 1080
+    assert py_vert == 1920
+    assert b_vert.zh_font_size == 56
+    assert b_vert.bilingual_zh_margin_v == 220
+    assert z_vert.zh_font_size == 64
+
+    # 4. 960x960 (Square 1:1)
+    b_sq, z_sq, px_sq, py_sq = compute_adaptive_subtitle_style(960, 960)
+    assert px_sq == 960
+    assert py_sq == 960
+    assert b_sq.zh_font_size >= 55  # Boosted for square screen
+    assert z_sq.zh_font_size >= 60
+

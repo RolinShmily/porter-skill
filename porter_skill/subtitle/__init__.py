@@ -2,6 +2,7 @@
 
 from porter_skill.subtitle.controller import (
     SubtitleResult,
+    compute_adaptive_subtitle_style,
     generate_subtitles,
     has_chinese_translation,
     run_asr_transcription,
@@ -44,6 +45,7 @@ __all__ = [
     "TranscriptSentence",
     "align_bilingual_items",
     "clean_chinese_subtitle_punctuation",
+    "compute_adaptive_subtitle_style",
     "generate_bilingual_ass",
     "generate_bilingual_srt",
     "generate_subtitles",

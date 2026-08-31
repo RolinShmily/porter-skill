@@ -11,7 +11,7 @@ from pathlib import Path
 import requests
 from openai import OpenAI
 
-from porter_skill.config import PorterConfig, get_default_config
+from porter_skill.config import PorterConfig, SubtitleStyleConfig, get_default_config
 from porter_skill.extractors.base import RawMaterialResult
 from porter_skill.subtitle.formatter import (
     SubtitleItem,
@@ -374,6 +374,86 @@ def run_asr_transcription(
     return False
 
 
+def compute_adaptive_subtitle_style(
+    width: int,
+    height: int,
+    base_style: SubtitleStyleConfig | None = None,
+) -> tuple[SubtitleStyleConfig, SubtitleStyleConfig, int, int]:
+    """
+    Compute aspect-ratio and resolution-adaptive subtitle styling for both
+    bilingual (bilingual_style) and pure-Chinese (zh_style) renders, along with
+    the exact 1:1 physical PlayRes dimensions (play_res_x, play_res_y).
+
+    Eliminates libass anamorphic font squeeze on non-16:9 videos (4:3, 3:2, 1:1)
+    and dynamically boosts font sizes for compact aspect ratios.
+    """
+    if base_style is None:
+        base_style = SubtitleStyleConfig()
+
+    w = max(width, 320)
+    h = max(height, 240)
+    aspect_ratio = w / h
+    is_vertical = h > w
+
+    bilingual_style = base_style.model_copy()
+    zh_style = base_style.model_copy()
+
+    if is_vertical:
+        # Vertical video (e.g. 1080x1920 Shorts / Reels / TikTok)
+        scale_v = h / 1920.0
+        bilingual_style.zh_font_size = max(24, round(56 * scale_v))
+        bilingual_style.en_font_size = max(16, round(38 * scale_v))
+        bilingual_style.bilingual_zh_margin_v = max(40, round(220 * scale_v))
+        bilingual_style.bilingual_en_margin_v = max(25, round(140 * scale_v))
+        bilingual_style.outline_width = max(1.5, round(4.0 * scale_v, 1))
+        bilingual_style.shadow = max(1.0, round(2.0 * scale_v, 1))
+
+        zh_style.zh_font_size = max(28, round(64 * scale_v))
+        zh_style.margin_v = max(35, round(180 * scale_v))
+        zh_style.outline_width = max(1.5, round(4.2 * scale_v, 1))
+        zh_style.shadow = max(1.0, round(2.0 * scale_v, 1))
+    else:
+        # Horizontal or square video (e.g. 16:9, 4:3, 3:2, 1:1)
+        scale_h = h / 1080.0
+
+        if aspect_ratio <= 1.1:
+            aspect_boost = 1.25  # Square (1:1)
+        elif aspect_ratio <= 1.4:
+            aspect_boost = 1.18  # 4:3 (~1.33)
+        elif aspect_ratio <= 1.6:
+            aspect_boost = 1.12  # 3:2 / 1106x720 (~1.53)
+        else:
+            aspect_boost = 1.00  # 16:9 / 21:9
+
+        # Bilingual track calculations
+        b_zh_size = max(18, round(base_style.zh_font_size * scale_h * aspect_boost))
+        b_en_size = max(12, round(base_style.en_font_size * scale_h * aspect_boost))
+        b_en_margin = max(15, round(base_style.bilingual_en_margin_v * scale_h * aspect_boost))
+        b_zh_margin = b_en_margin + b_en_size + max(6, round(12 * scale_h))
+
+        bilingual_style.zh_font_size = b_zh_size
+        bilingual_style.en_font_size = b_en_size
+        bilingual_style.bilingual_en_margin_v = b_en_margin
+        bilingual_style.bilingual_zh_margin_v = b_zh_margin
+        bilingual_style.outline_width = max(
+            1.5, round(base_style.outline_width * scale_h * aspect_boost, 1)
+        )
+        bilingual_style.shadow = max(1.0, round(base_style.shadow * scale_h * aspect_boost, 1))
+
+        # Pure Chinese track calculations (larger font size for clean single track)
+        zh_single_size = max(20, round(58 * scale_h * aspect_boost))
+        zh_single_margin = max(15, round(base_style.margin_v * scale_h * aspect_boost))
+
+        zh_style.zh_font_size = zh_single_size
+        zh_style.margin_v = zh_single_margin
+        zh_style.outline_width = max(
+            1.5, round(base_style.outline_width * 1.1 * scale_h * aspect_boost, 1)
+        )
+        zh_style.shadow = max(1.0, round(base_style.shadow * scale_h * aspect_boost, 1))
+
+    return bilingual_style, zh_style, w, h
+
+
 def has_chinese_translation(items: list[SubtitleItem] | list[TranscriptSentence]) -> bool:
     """Check if translated subtitle items or sentences actually contain Chinese (CJK) characters."""
     for it in items:
@@ -528,27 +608,12 @@ def generate_subtitles(
     is_vertical = real_h > real_w
     max_cjk_len = 13 if is_vertical else 28
 
-    # ASS virtual coordinate canvas: Standardized 1080p PlayRes space
-    # (1920x1080 for horizontal / 1080x1920 for vertical)
-    # libass automatically scales this standard canvas to match any actual physical video resolution
-    # (720p, 1080p, 2K, 4K), ensuring consistent font proportion and margin alignment.
-    style_for_render = config.style.model_copy()
-    if is_vertical:
-        play_res_x = 1080
-        play_res_y = 1920
-        style_for_render.zh_font_size = 56
-        style_for_render.en_font_size = 38
-        style_for_render.bilingual_zh_margin_v = 220
-        style_for_render.bilingual_en_margin_v = 140
-        style_for_render.margin_v = 180
-    else:
-        play_res_x = 1920
-        play_res_y = 1080
-        style_for_render.zh_font_size = config.style.zh_font_size
-        style_for_render.en_font_size = config.style.en_font_size
-        style_for_render.bilingual_zh_margin_v = config.style.bilingual_zh_margin_v
-        style_for_render.bilingual_en_margin_v = config.style.bilingual_en_margin_v
-        style_for_render.margin_v = config.style.margin_v
+    # Compute 1:1 physical PlayRes canvas and aspect-ratio adaptive styles
+    bilingual_style, zh_style, play_res_x, play_res_y = compute_adaptive_subtitle_style(
+        width=real_w,
+        height=real_h,
+        base_style=config.style,
+    )
 
     zh_semantic_cues: list[SubtitleItem] = []
     final_cues: list[SubtitleItem] = []
@@ -583,7 +648,7 @@ def generate_subtitles(
     # ASS: Synchronized 1:1 dual-track layers + fade transitions for video burning
     bilingual_ass_text = generate_bilingual_ass(
         items=final_cues,
-        style=style_for_render,
+        style=bilingual_style,
         play_res_x=play_res_x,
         play_res_y=play_res_y,
         zh_items=final_cues,
@@ -596,7 +661,7 @@ def generate_subtitles(
 
     zh_ass_text = generate_zh_ass(
         final_cues,
-        style=style_for_render,
+        style=zh_style,
         play_res_x=play_res_x,
         play_res_y=play_res_y,
     )

@@ -31,6 +31,171 @@ CHINESE_CONJUNCTIONS = [
     "除非",
 ]
 
+PROPER_NOUNS = {
+    "AI", "API", "ASR", "CPU", "GPU", "HTML", "HTTP", "HTTPS", "JSON", "LLM", "NASA",
+    "NLP", "OS", "RAM", "SDK", "SQL", "SSD", "STT", "TTS", "TUI", "UI", "UK", "URL",
+    "USA", "USB", "VAD", "XML", "YouTube", "Google", "OpenAI", "DeepSeek", "Microsoft",
+    "Apple", "GitHub", "Bilibili", "Claude", "ChatGPT", "Windows", "Linux", "macOS",
+    "Android", "iOS", "Python", "JavaScript", "TypeScript", "Rust", "Java", "Docker",
+    "FFmpeg", "Obsidian", "Notion", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+    "Saturday", "Sunday", "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December",
+}
+
+PROPER_NOUNS_LOWER = {w.lower(): w for w in PROPER_NOUNS}
+
+SENTENCE_STARTERS = {
+    "it", "it's", "this", "that", "these", "those", "there", "there's", "they", "they're",
+    "we", "we're", "he", "he's", "she", "she's", "however", "therefore", "moreover",
+    "furthermore", "meanwhile", "instead", "otherwise", "nevertheless", "suddenly",
+    "eventually", "actually", "basically", "finally", "first", "second", "third", "next",
+}
+
+SUBORDINATE_CONJUNCTIONS = {
+    "but", "so", "because", "although", "though", "while", "whereas",
+    "which", "since", "unless", "yet",
+}
+
+COORDINATING_CONJUNCTIONS = {"and", "or", "nor"}
+
+PRONOUN_STARTERS = {
+    "i", "you", "he", "she", "it", "we", "they", "this", "that", "there", "what", "how",
+}
+
+NON_TERMINAL_WORDS = {
+    "of", "in", "to", "for", "with", "on", "at", "by", "from", "into", "onto",
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did", "can", "could", "will", "would",
+    "shall", "should", "may", "might", "must", "my", "your", "his", "her", "its",
+    "our", "their", "and", "or", "but", "nor", "so", "than", "as", "that",
+}
+
+HANGING_CONJUNCTIONS = {
+    "and", "but", "or", "so", "yet", "for", "nor", "because", "although",
+    "though", "while", "whereas", "which", "since", "unless", "if", "that",
+    "when", "where", "as",
+}
+
+
+@dataclass
+class _TokenPart:
+    raw: str
+    prefix: str
+    core: str
+    suffix: str
+
+
+def restore_english_punctuation_heuristic(text: str) -> str:
+    """
+    Restore missing punctuation, clause boundaries, and capitalization for English ASR text.
+    Handles run-on ASR transcriptions, capitalizing new sentences and inserting periods/commas.
+    """
+    text = text.strip()
+    if not text:
+        return ""
+
+    tokens = text.split()
+    if not tokens:
+        return ""
+
+    cleaned_tokens: list[_TokenPart] = []
+    for token in tokens:
+        raw_word = token
+        m = re.match(r"^([\"'\(]*)(.*?)([\.\,\!\?\;\:\)\'\"]*)$", raw_word)
+        if m:
+            prefix = m.group(1) or ""
+            core = m.group(2) or ""
+            suffix = m.group(3) or ""
+        else:
+            prefix, core, suffix = "", raw_word, ""
+        cleaned_tokens.append(_TokenPart(raw=raw_word, prefix=prefix, core=core, suffix=suffix))
+
+    result_words: list[str] = []
+    num_tokens = len(cleaned_tokens)
+
+    for i in range(num_tokens):
+        curr = cleaned_tokens[i]
+        core = curr.core
+        lower_core = core.lower()
+
+        # 1. Capitalization / Proper noun normalization
+        if lower_core in PROPER_NOUNS_LOWER:
+            norm_core = PROPER_NOUNS_LOWER[lower_core]
+        elif lower_core in ("i", "i'm", "i'll", "i've", "i'd"):
+            norm_core = lower_core.capitalize() if lower_core == "i" else "I" + lower_core[1:]
+        elif i == 0 or (result_words and result_words[-1].endswith((".", "!", "?"))):
+            norm_core = core.capitalize()
+        else:
+            # Inside a sentence: if it was capitalized by ASR but not a starter/proper noun, lower it
+            if core.istitle() and not core.isupper() and lower_core not in SENTENCE_STARTERS:
+                norm_core = core.lower()
+            else:
+                norm_core = core
+
+        # Check if previous word needs a period or comma before this word
+        if i > 0 and not result_words[-1].endswith((".", "!", "?", ",", ";", ":", "--", "—")):
+            prev_token = cleaned_tokens[i - 1]
+            prev_lower = prev_token.core.lower()
+
+            words_in_current_sentence = 0
+            for w in reversed(result_words):
+                words_in_current_sentence += 1
+                if w.endswith((".", "!", "?")):
+                    break
+
+            is_sentence_break = False
+            if (
+                curr.raw and curr.raw[0].isupper()
+                and lower_core in SENTENCE_STARTERS
+                and prev_lower not in NON_TERMINAL_WORDS
+                and words_in_current_sentence >= 4
+            ):
+                is_sentence_break = True
+
+            next_token = cleaned_tokens[i + 1] if i + 1 < num_tokens else None
+            next_lower = next_token.core.lower() if next_token else ""
+
+            is_coordinating_clause = (
+                lower_core in COORDINATING_CONJUNCTIONS
+                and next_lower in PRONOUN_STARTERS
+                and words_in_current_sentence >= 4
+                and prev_lower not in NON_TERMINAL_WORDS
+            )
+
+            is_subordinate_clause = (
+                lower_core in SUBORDINATE_CONJUNCTIONS
+                and prev_lower not in NON_TERMINAL_WORDS
+                and words_in_current_sentence >= 4
+            )
+
+            if is_sentence_break:
+                result_words[-1] += "."
+                norm_core = norm_core.capitalize()
+            elif is_subordinate_clause or is_coordinating_clause:
+                result_words[-1] += ","
+                norm_core = norm_core.lower() if lower_core not in PROPER_NOUNS_LOWER else norm_core
+
+        word_out = curr.prefix + norm_core + curr.suffix
+        result_words.append(word_out)
+
+    final_text = " ".join(result_words).strip()
+
+    # Ensure final sentence ends with terminal punctuation
+    if final_text and not final_text.endswith((".", "!", "?", "...", "—")):
+        first_word = final_text.split()[0].lower().rstrip(",.!?")
+        if (
+            first_word in (
+                "how", "why", "what", "where", "when", "who", "which",
+                "do", "does", "did", "is", "are", "can", "could", "would", "should"
+            )
+            and not any(final_text.startswith(p) for p in ("What I", "How to", "Why we"))
+        ):
+            final_text += "?"
+        else:
+            final_text += "."
+
+    return final_text
+
 
 @dataclass
 class SubtitleItem:
@@ -270,12 +435,14 @@ def reconstruct_sentences_from_fragments(
         )
 
         if should_split:
+            raw_en = " ".join(curr_texts)
+            refined_en = restore_english_punctuation_heuristic(raw_en)
             sentences.append(
                 TranscriptSentence(
                     sentence_id=curr_id,
                     start_ms=curr_start,
                     end_ms=curr_end,
-                    en_text=" ".join(curr_texts),
+                    en_text=refined_en,
                     zh_text="".join(curr_zh_texts),
                     fragment_indices=list(curr_frags),
                 )
@@ -294,12 +461,14 @@ def reconstruct_sentences_from_fragments(
             curr_frags.append(next_item.index)
 
     if curr_texts:
+        raw_en = " ".join(curr_texts)
+        refined_en = restore_english_punctuation_heuristic(raw_en)
         sentences.append(
             TranscriptSentence(
                 sentence_id=curr_id,
                 start_ms=curr_start,
                 end_ms=curr_end,
-                en_text=" ".join(curr_texts),
+                en_text=refined_en,
                 zh_text="".join(curr_zh_texts),
                 fragment_indices=list(curr_frags),
             )
@@ -311,15 +480,14 @@ def reconstruct_sentences_from_fragments(
 def clean_chinese_subtitle_punctuation(text: str) -> str:
     """
     Format Chinese subtitle text according to professional subtitle standards:
-    - Preserve internal commas (，), pauses (、), question marks (？), exclamation marks (！), colons (：).
-    - Remove trailing period (。) and trailing commas.
-    - Normalize whitespace and punctuation.
+    - Preserve internal commas (，), pauses (、), question marks (？), exclamation marks (！), colons (：), dashes (——).
+    - Only omit the trailing period (。 or .) at the very end of the subtitle line.
     """
     text = text.strip()
     if not text:
         return ""
-    # Strip trailing punctuation like 。 . ； ; ， ,
-    text = re.sub(r"[。\.；;，,]+$", "", text).strip()
+    # Strip only trailing periods (。 or .) at the very end
+    text = re.sub(r"[。\.]+$", "", text).strip()
     return text
 
 
@@ -388,41 +556,90 @@ def split_chinese_text_by_phrase(zh_text: str, max_len: int = 28) -> list[str]:
 
 def split_english_text_to_n_parts(en_text: str, n_parts: int, zh_lengths: list[int]) -> list[str]:
     """
-    Split an English sentence into n_parts aligning with the Chinese sub-phrases.
-    Prioritizes punctuation/clause boundaries, falling back to proportional word-count allocation.
+    Split English into n parts using clause & punctuation aware boundaries,
+    strictly preventing hanging conjunctions at line ends, while proportionally
+    matching the Chinese phrased cues.
     """
-    en_text = en_text.strip()
+    en_text = restore_english_punctuation_heuristic(en_text.strip())
     if n_parts <= 1 or not en_text:
         return [en_text]
 
-    clauses = [
-        c.strip()
-        for c in re.split(r"[,;—\-]|\band\b|\bbut\b|\bso\b|\bbecause\b", en_text)
-        if c.strip()
-    ]
-    if len(clauses) == n_parts:
-        return clauses
-
     words = en_text.split()
-    if len(words) <= n_parts:
+    total_words = len(words)
+    if total_words <= n_parts:
         return [en_text] + [""] * (n_parts - 1)
 
     total_zh_len = sum(zh_lengths) if zh_lengths else n_parts
-    ratios = [(length / total_zh_len) for length in zh_lengths]
+    target_proportions = [(length / total_zh_len) for length in zh_lengths]
+
+    target_cuts: list[float] = []
+    cum = 0.0
+    for prop in target_proportions[:-1]:
+        cum += prop
+        target_cuts.append(cum * total_words)
+
+    def score_breakpoint(k: int, target_pos: float) -> float:
+        prev_word = words[k]
+        next_word = words[k + 1] if k + 1 < total_words else ""
+
+        prev_clean = prev_word.rstrip(".,!?;:\"'—)").lower()
+        next_clean = next_word.lstrip("\"'(").lower()
+
+        dist = abs((k + 1) - target_pos)
+        score = -dist * 2.0
+
+        if prev_word.endswith((".", "!", "?")):
+            score += 15.0
+        elif prev_word.endswith((";", ":", "—", "--")):
+            score += 12.0
+        elif prev_word.endswith(","):
+            score += 10.0
+
+        if next_clean in HANGING_CONJUNCTIONS:
+            score += 8.0
+
+        if prev_clean in HANGING_CONJUNCTIONS and not prev_word.endswith((".", "!", "?")):
+            score -= 25.0
+
+        if prev_clean in NON_TERMINAL_WORDS and not prev_word.endswith((".", "!", "?")):
+            score -= 15.0
+
+        return score
+
+    chosen_cuts: list[int] = []
+    min_cut = 0
+
+    for i, target_pos in enumerate(target_cuts):
+        remaining_parts = (n_parts - 1) - i
+        max_cut = total_words - 1 - remaining_parts
+
+        best_k = min_cut
+        best_score = -999999.0
+
+        for k in range(min_cut, max_cut + 1):
+            s = score_breakpoint(k, target_pos)
+            if s > best_score:
+                best_score = s
+                best_k = k
+
+        chosen_cuts.append(best_k)
+        min_cut = best_k + 1
 
     en_parts: list[str] = []
-    current_idx = 0
-    total_words = len(words)
+    start_idx = 0
+    for cut in chosen_cuts:
+        part_words = words[start_idx : cut + 1]
+        en_parts.append(" ".join(part_words).strip())
+        start_idx = cut + 1
+    en_parts.append(" ".join(words[start_idx:]).strip())
 
-    for i in range(n_parts):
-        if i == n_parts - 1:
-            part_words = words[current_idx:]
-        else:
-            count = max(1, round(ratios[i] * total_words))
-            count = min(count, total_words - current_idx - (n_parts - i - 1))
-            part_words = words[current_idx : current_idx + count]
-            current_idx += count
-        en_parts.append(" ".join(part_words))
+    for i in range(len(en_parts)):
+        if i > 0 and en_parts[i - 1].endswith((".", "!", "?")):
+            p = en_parts[i]
+            if p and p[0].islower():
+                first_w, *rest = p.split(maxsplit=1)
+                if first_w.lower() not in PROPER_NOUNS_LOWER:
+                    en_parts[i] = first_w.capitalize() + (" " + rest[0] if rest else "")
 
     return en_parts
 
