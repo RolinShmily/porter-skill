@@ -106,7 +106,16 @@ def resolve_and_clean_url(url: str, timeout: float = 8.0) -> str:
     hostname = (parsed.hostname or "").lower()
 
     # Expand shortened domains or redirect links
-    shortened_hosts = {"t.co", "bit.ly", "tinyurl.com", "is.gd", "buff.ly", "ow.ly", "ift.tt"}
+    shortened_hosts = {
+        "t.co",
+        "bit.ly",
+        "tinyurl.com",
+        "is.gd",
+        "buff.ly",
+        "ow.ly",
+        "ift.tt",
+        "ig.me",
+    }
     if hostname in shortened_hosts or hostname.endswith(".t.co"):
         try:
             resp = requests.head(
@@ -150,6 +159,8 @@ def identify_platform(url: str) -> str:
         return "youtube"
     if "x.com" in host or "twitter.com" in host or "t.co" in host:
         return "x"
+    if "instagram.com" in host or "instagr.am" in host or "ig.me" in host:
+        return "instagram"
     return "generic"
 
 
@@ -213,26 +224,44 @@ def inspect_url(
             error_message="Could not extract metadata from URL.",
         )
 
-    # Check if video formats exist
+    # Check if video formats exist or handle carousel playlist
     formats = info.get("formats") or []
     has_video_stream = False
     width = info.get("width")
     height = info.get("height")
 
-    # If top-level width/height missing, find best format
-    for f in formats:
-        if f.get("vcodec") and f.get("vcodec") != "none":
+    # If carousel playlist on Instagram, check first video entry
+    if info.get("_type") == "playlist" or (
+        isinstance(info.get("entries"), list) and info["entries"]
+    ):
+        for entry in info["entries"]:
+            if not isinstance(entry, dict):
+                continue
+            entry_formats = entry.get("formats") or []
+            if (
+                any(f.get("vcodec") != "none" for f in entry_formats if isinstance(f, dict))
+                or entry.get("duration")
+                or entry.get("vcodec") != "none"
+            ):
+                has_video_stream = True
+                width = width or entry.get("width")
+                height = height or entry.get("height")
+                break
+    else:
+        # If top-level width/height missing, find best format
+        for f in formats:
+            if f.get("vcodec") and f.get("vcodec") != "none":
+                has_video_stream = True
+                if not width and f.get("width"):
+                    width = f.get("width")
+                if not height and f.get("height"):
+                    height = f.get("height")
+
+        # If direct duration / url exists, consider valid
+        if info.get("duration") or info.get("url"):
             has_video_stream = True
-            if not width and f.get("width"):
-                width = f.get("width")
-            if not height and f.get("height"):
-                height = f.get("height")
 
-    # If direct duration / url exists, consider valid
-    if info.get("duration") or info.get("url"):
-        has_video_stream = True
-
-    if not has_video_stream and not formats:
+    if not has_video_stream and not formats and info.get("_type") != "playlist":
         return InspectionResult(
             input_url=url,
             canonical_url=canonical,
@@ -245,13 +274,15 @@ def inspect_url(
 
     # Title extraction & cleaning
     raw_title = info.get("title") or info.get("description") or "video"
-    # Clean leading tweet text if on X/Twitter
-    if platform == "x":
+    # Clean leading text if on X/Twitter or Instagram
+    if platform in ("x", "instagram"):
         lines = [line.strip() for line in raw_title.splitlines() if line.strip()]
         first_line = lines[0] if lines else "video"
-        # Remove trailing URLs
+        # Remove URLs & leading mentions
         first_line = re.sub(r"https?://\S+", "", first_line).strip()
-        raw_title = first_line or "Tweet_video"
+        first_line = re.sub(r"^(@\w+\s*)+", "", first_line).strip()
+        first_line = re.sub(r"(#\w+\s*)+$", "", first_line).strip()
+        raw_title = first_line or f"{platform.capitalize()}_video"
 
     safe_title = sanitize_filename(raw_title, max_length=60)
     video_id = str(info.get("id") or "unknown_id")

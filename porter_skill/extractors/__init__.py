@@ -14,12 +14,14 @@ from porter_skill.extractors.inspector import (
     inspect_url,
     resolve_and_clean_url,
 )
+from porter_skill.extractors.instagram import InstagramExtractor
 from porter_skill.extractors.x import XExtractor
 from porter_skill.extractors.youtube import YouTubeExtractor
 
 __all__ = [
     "BasePlatformExtractor",
     "InspectionResult",
+    "InstagramExtractor",
     "RawMaterialResult",
     "VideoMetadata",
     "XExtractor",

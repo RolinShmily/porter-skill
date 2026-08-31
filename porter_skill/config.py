@@ -71,7 +71,7 @@ class PorterConfig(BaseModel):
     asr: ASRConfig = Field(default_factory=ASRConfig)
     ffmpeg: FFmpegConfig = Field(default_factory=FFmpegConfig)
     style: SubtitleStyleConfig = Field(default_factory=SubtitleStyleConfig)
-    output_dir: Path = Field(default_factory=lambda: Path("./output"))
+    output_dir: Path = Field(default_factory=lambda: Path("./porter_output"))
     cookies_file: str | None = None
     cookies_browser: str | None = None
     config_source: str | None = None

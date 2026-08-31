@@ -644,7 +644,9 @@ def test_split_english_text_clause_aware():
 def test_split_chinese_sentence_into_cues_with_restoration():
     """Verify end-to-end cue splitting with punctuation and alignment."""
     raw_en = "understanding group theory doesn't clog your working memory It doesn't compete with your active thinking But it kind of expands What your brain can do"
-    zh_text = "理解群论不会堵塞你的工作记忆，它不会与你的主动思维竞争，但它有点扩展了你大脑能做的事情"
+    zh_text = (
+        "理解群论不会堵塞你的工作记忆，它不会与你的主动思维竞争，但它有点扩展了你大脑能做的事情"
+    )
 
     cues = split_chinese_sentence_into_cues(
         en_text=raw_en,
@@ -695,4 +697,3 @@ def test_compute_adaptive_subtitle_style():
     assert py_sq == 960
     assert b_sq.zh_font_size >= 55  # Boosted for square screen
     assert z_sq.zh_font_size >= 60
-

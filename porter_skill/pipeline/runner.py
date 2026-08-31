@@ -28,7 +28,7 @@ class PipelineResult:
 
 def run_pipeline(
     url: str,
-    output_dir: Path | str = "./output",
+    output_dir: Path | str = "./porter_output",
     config: PorterConfig | None = None,
     skip_burn: bool = False,
     only_bilingual: bool = False,

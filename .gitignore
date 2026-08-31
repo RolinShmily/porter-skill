@@ -63,6 +63,7 @@ cookies.txt
 
 # Media files & Pipeline outputs
 output/
+porter_output/
 downloads/
 *.mp4
 *.mkv
@@ -77,11 +78,13 @@ downloads/
 *.part
 *.ytdl
 
-# Temporary files
+# Temporary files & Session exports
 .tmp/
 tmp/
 *.tmp
 .memory/
+pi-session*
+*.session.html
 
 # IDE & OS files
 .idea/

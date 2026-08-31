@@ -20,8 +20,8 @@
 
 - [x] **YouTube** (`youtube.com`, `youtu.be`) —— 深度适配（支持 1080p/4K 分离流下载、JS 签名挑战求解、多语言原生/机翻字幕提取、反爬/大会员 Cookie 会话注入）
 - [x] **X / Twitter** (`x.com`, `twitter.com`, `t.co`) —— 深度适配（支持短链重定向秒级展开、推文标题智能清洗、1080p 视频流提取、9:16 竖屏手机画幅自适应排版）
+- [x] **Instagram** (`instagram.com`, `instagr.am`, `ig.me`) —— 深度适配（支持 Reels、Posts、IGTV、多视频轮播 Carousels 智能过滤、Caption 标题语义提炼、免登录原生提取与 Embed 降级）
 - [ ] **Bilibili (哔哩哔哩)** (`bilibili.com`) —— 规划中
-- [ ] **Instagram** (`instagram.com`) —— 规划中
 - [ ] **TikTok** (`tiktok.com`) —— 规划中
 
 ---
@@ -69,7 +69,7 @@
 每个任务以 `<video_id>_<safe_title>` 创建独立文件夹，保持极简的两级扁平结构：
 
 ```text
-output/<video_id>_<safe_title>/
+porter_output/<video_id>_<safe_title>/
 ├── raw/                              # 【一级：原始物料区 (Raw Assets)】
 │   ├── video.mp4                     # 原始标准母版 (H.264 + AAC 广播级封装, faststart)
 │   ├── audio.wav                     # 原始基准音轨 (16kHz 16bit 单声道 WAV)
@@ -162,10 +162,10 @@ python scripts/run_porter.py --doctor
 ### 2. 标准搬运执行（下载 ➔ 提取 ➔ 翻译 ➔ 双版本出片）
 ```bash
 # 标准出片
-porter "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./output"
+porter "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./porter_output"
 
 # 使用免安装脚本执行
-python scripts/run_porter.py "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./output"
+python scripts/run_porter.py "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./porter_output"
 ```
 
 ### 3. 常用进阶参数

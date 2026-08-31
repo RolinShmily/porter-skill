@@ -1,6 +1,7 @@
 """Tests for configuration loading, priority resolution, and persistence."""
 
 import json
+from pathlib import Path
 
 from porter_skill.config import (
     PorterConfig,
@@ -63,6 +64,7 @@ def test_porter_config_defaults():
     assert cfg.style.zh_font_size == 52
     assert cfg.style.en_font_size == 34
     assert cfg.ffmpeg.audio_codec == "aac"
+    assert cfg.output_dir == Path("./porter_output")
 
 
 def test_load_cookies_config(tmp_path):

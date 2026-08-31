@@ -72,8 +72,8 @@ def main() -> int:
     parser.add_argument(
         "-o",
         "--output-dir",
-        default="./output",
-        help="Target output directory (default: ./output).",
+        default="./porter_output",
+        help="Target output directory (default: ./porter_output).",
     )
     parser.add_argument(
         "--doctor",
