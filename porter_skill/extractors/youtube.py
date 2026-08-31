@@ -18,6 +18,7 @@ from porter_skill.extractors.base import (
     register_extractor,
     sanitize_filename,
 )
+from porter_skill.synthesizer import get_video_dimensions, is_valid_video_file
 
 
 def _convert_vtt_to_srt(vtt_content: str) -> str:
@@ -282,45 +283,66 @@ class YouTubeExtractor(BasePlatformExtractor):
                     except Exception as e:  # noqa: BLE001
                         print(f"  [WARN] Subtitle download for {sub_lang} failed: {e}")
 
-            # 2b. Download media streams independently (Cap at 1080p for optimal quality vs speed balance)
-            format_spec = (
-                "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
-                "bestvideo[height<=1080]+bestaudio/"
-                "best[height<=1080]/best"
-            )
-            ydl_opts_download: dict[str, Any] = {
-                "format": format_spec,
-                "outtmpl": raw_download_template,
-                "merge_output_format": "mp4",
-                "remote_components": {"ejs": "github"},
-                "quiet": False,
-                "no_warnings": True,
-                "overwrites": True,
-                "extractor_args": {"youtube": {"player_client": player_clients}},
-            }
-            if cookies_file:
-                ydl_opts_download["cookiefile"] = cookies_file
-            if cookies_browser:
-                ydl_opts_download["cookiesfrombrowser"] = (cookies_browser,)
-
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
-                    ydl.download([url])
-            except Exception as e:  # noqa: BLE001
-                print(f"  [WARN] Standard media download encountered issue: {e}")
-                print("  -> Retrying media download with Android client...")
-                ydl_opts_retry = dict(ydl_opts_download)
-                ydl_opts_retry["extractor_args"] = {"youtube": {"player_client": ["android"]}}
-                with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl:
-                    ydl.download([url])
-
-            # Find downloaded video in temp_dir
-            downloaded_files = list(temp_dir.glob("download.*"))
-            downloaded_video = None
-            for f in downloaded_files:
-                if f.suffix.lower() in [".mkv", ".mp4", ".webm", ".ts", ".flv", ".mov"]:
+            # Check if temporary download already exists and is valid from prior run
+            downloaded_video: Path | None = None
+            for f in temp_dir.glob("download.*"):
+                if f.suffix.lower() in [
+                    ".mkv",
+                    ".mp4",
+                    ".webm",
+                    ".ts",
+                    ".flv",
+                    ".mov",
+                ] and is_valid_video_file(f, ffprobe_path):
                     downloaded_video = f
+                    print(f"  ✓ Reusing existing valid temporary download: {downloaded_video.name}")
                     break
+
+            if not downloaded_video:
+                # 2b. Download media streams independently (Cap at 1080p for optimal quality vs speed balance)
+                format_spec = (
+                    "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
+                    "bestvideo[height<=1080]+bestaudio/"
+                    "best[height<=1080]/best"
+                )
+                ydl_opts_download: dict[str, Any] = {
+                    "format": format_spec,
+                    "outtmpl": raw_download_template,
+                    "merge_output_format": "mp4",
+                    "remote_components": {"ejs": "github"},
+                    "quiet": False,
+                    "no_warnings": True,
+                    "continuedl": True,
+                    "nopart": False,
+                    "concurrent_fragment_downloads": 5,
+                    "retries": 10,
+                    "fragment_retries": 10,
+                    "buffersize": 1024 * 64,
+                    "http_chunk_size": 10485760,
+                    "extractor_args": {"youtube": {"player_client": player_clients}},
+                }
+                if cookies_file:
+                    ydl_opts_download["cookiefile"] = cookies_file
+                if cookies_browser:
+                    ydl_opts_download["cookiesfrombrowser"] = (cookies_browser,)
+
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
+                        ydl.download([url])
+                except Exception as e:  # noqa: BLE001
+                    print(f"  [WARN] Standard media download encountered issue: {e}")
+                    print("  -> Retrying media download with Android client...")
+                    ydl_opts_retry = dict(ydl_opts_download)
+                    ydl_opts_retry["extractor_args"] = {"youtube": {"player_client": ["android"]}}
+                    with yt_dlp.YoutubeDL(ydl_opts_retry) as ydl:
+                        ydl.download([url])
+
+                # Find downloaded video in temp_dir
+                downloaded_files = list(temp_dir.glob("download.*"))
+                for f in downloaded_files:
+                    if f.suffix.lower() in [".mkv", ".mp4", ".webm", ".ts", ".flv", ".mov"]:
+                        downloaded_video = f
+                        break
 
             if not downloaded_video or not downloaded_video.exists():
                 raise RuntimeError(f"Download failed: video file not found in {temp_dir}")
@@ -419,6 +441,12 @@ class YouTubeExtractor(BasePlatformExtractor):
                 raise RuntimeError(f"Audio extraction failed:\n{proc_wav.stderr}")
         else:
             print(f"  ✓ Reusing existing standardized raw video and audio: {raw_dir}")
+
+        # Update metadata with actual standardized video dimensions
+        actual_w, actual_h = get_video_dimensions(standard_video_path, ffprobe_path)
+        metadata.width = actual_w
+        metadata.height = actual_h
+        metadata.is_vertical = actual_h > actual_w
 
         # 5. Handle Cover Art: raw/cover.jpg
         cover_path = raw_dir / "cover.jpg"

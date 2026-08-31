@@ -40,6 +40,7 @@ from porter_skill.subtitle.translator import (
     translate_with_videocaptioner_cli,
     translate_with_videocaptioner_free,
 )
+from porter_skill.synthesizer import get_video_dimensions
 
 
 @dataclass
@@ -522,24 +523,32 @@ def generate_subtitles(
         print(f"  ✓ Transcript saved to {transcript_json_path.name} & {transcript_txt_path.name}")
 
     # Step 6: Expand transcript sentences into phrased, visually balanced SubtitleItems
-    is_vertical = bool(raw_material.metadata and raw_material.metadata.is_vertical)
-    max_cjk_len = 13 if is_vertical else 20
-    play_res_x = (
-        raw_material.metadata.width
-        if raw_material.metadata and raw_material.metadata.width
-        else (1080 if is_vertical else 1920)
-    )
-    play_res_y = (
-        raw_material.metadata.height
-        if raw_material.metadata and raw_material.metadata.height
-        else (1920 if is_vertical else 1080)
-    )
+    # Measure actual physical video dimensions via ffprobe
+    real_w, real_h = get_video_dimensions(raw_material.video_path, config.ffmpeg.ffprobe_path)
+    is_vertical = real_h > real_w
+    max_cjk_len = 13 if is_vertical else 28
 
+    # ASS virtual coordinate canvas: Standardized 1080p PlayRes space
+    # (1920x1080 for horizontal / 1080x1920 for vertical)
+    # libass automatically scales this standard canvas to match any actual physical video resolution
+    # (720p, 1080p, 2K, 4K), ensuring consistent font proportion and margin alignment.
     style_for_render = config.style.model_copy()
     if is_vertical:
-        style_for_render.bilingual_zh_margin_v = int(play_res_y * 0.12)
-        style_for_render.bilingual_en_margin_v = int(play_res_y * 0.06)
-        style_for_render.margin_v = int(play_res_y * 0.08)
+        play_res_x = 1080
+        play_res_y = 1920
+        style_for_render.zh_font_size = 56
+        style_for_render.en_font_size = 38
+        style_for_render.bilingual_zh_margin_v = 220
+        style_for_render.bilingual_en_margin_v = 140
+        style_for_render.margin_v = 180
+    else:
+        play_res_x = 1920
+        play_res_y = 1080
+        style_for_render.zh_font_size = config.style.zh_font_size
+        style_for_render.en_font_size = config.style.en_font_size
+        style_for_render.bilingual_zh_margin_v = config.style.bilingual_zh_margin_v
+        style_for_render.bilingual_en_margin_v = config.style.bilingual_en_margin_v
+        style_for_render.margin_v = config.style.margin_v
 
     zh_semantic_cues: list[SubtitleItem] = []
     final_cues: list[SubtitleItem] = []
@@ -560,8 +569,6 @@ def generate_subtitles(
             cue_idx += 1
 
     final_cues = normalize_subtitle_items(final_cues)
-    zh_semantic_cues = normalize_subtitle_items(zh_semantic_cues)
-    en_acoustic_cues = normalize_subtitle_items(base_items)
 
     # Step 7: Generate 4 cooked subtitle files
     bilingual_srt_path = cooked_dir / "subtitle_bilingual.srt"
@@ -573,22 +580,22 @@ def generate_subtitles(
     bilingual_srt_text = generate_bilingual_srt(final_cues)
     bilingual_srt_path.write_text(bilingual_srt_text, encoding="utf-8")
 
-    # ASS: Asynchronous dual-track independent layers + fade-in/fade-out for video burning
+    # ASS: Synchronized 1:1 dual-track layers + fade transitions for video burning
     bilingual_ass_text = generate_bilingual_ass(
         items=final_cues,
         style=style_for_render,
         play_res_x=play_res_x,
         play_res_y=play_res_y,
-        zh_items=zh_semantic_cues,
-        en_items=en_acoustic_cues,
+        zh_items=final_cues,
+        en_items=final_cues,
     )
     bilingual_ass_path.write_text(bilingual_ass_text, encoding="utf-8")
 
-    zh_srt_text = generate_zh_srt(zh_semantic_cues)
+    zh_srt_text = generate_zh_srt(final_cues)
     zh_srt_path.write_text(zh_srt_text, encoding="utf-8")
 
     zh_ass_text = generate_zh_ass(
-        zh_semantic_cues,
+        final_cues,
         style=style_for_render,
         play_res_x=play_res_x,
         play_res_y=play_res_y,

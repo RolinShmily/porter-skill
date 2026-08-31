@@ -8,6 +8,7 @@ from porter_skill.config import PorterConfig
 from porter_skill.synthesizer.burn import (
     burn_dual_release,
     burn_hardsub,
+    get_video_dimensions,
     is_valid_video_file,
 )
 from porter_skill.synthesizer.utils import escape_ffmpeg_filter_path
@@ -134,3 +135,17 @@ def test_is_valid_video_file(synthetic_video_and_sub, tmp_path):
     bad_video = tmp_path / "corrupted.mp4"
     bad_video.write_bytes(b"corrupted binary header without moov atom")
     assert is_valid_video_file(bad_video) is False
+
+
+def test_get_video_dimensions(synthetic_video_and_sub, tmp_path):
+    """Test probing video dimensions with ffprobe."""
+    video_in, _, _ = synthetic_video_and_sub
+    width, height = get_video_dimensions(video_in)
+    assert width == 320
+    assert height == 240
+
+    # Non-existent file fallback
+    non_existent = tmp_path / "does_not_exist.mp4"
+    w2, h2 = get_video_dimensions(non_existent)
+    assert w2 == 1920
+    assert h2 == 1080

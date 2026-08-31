@@ -15,6 +15,7 @@ from porter_skill.subtitle.formatter import (
     SubtitleItem,
     TranscriptSentence,
     align_bilingual_items,
+    clean_chinese_subtitle_punctuation,
     generate_bilingual_ass,
     generate_bilingual_srt,
     generate_zh_ass,
@@ -142,16 +143,25 @@ def test_reconstruct_sentences_from_fragments():
     assert sentences[1].fragment_indices == [4, 5]
 
 
+def test_clean_chinese_subtitle_punctuation():
+    """Verify professional punctuation formatting for Chinese subtitles."""
+    assert clean_chinese_subtitle_punctuation("这是一个完整句子。") == "这是一个完整句子"
+    assert clean_chinese_subtitle_punctuation("这是前半句，") == "这是前半句"
+    assert clean_chinese_subtitle_punctuation("这是问句吗？") == "这是问句吗？"
+    assert clean_chinese_subtitle_punctuation("这是感叹句！") == "这是感叹句！"
+    assert clean_chinese_subtitle_punctuation("前半句，后半句。") == "前半句，后半句"
+
+
 def test_split_chinese_text_by_phrase():
     """Verify Chinese phrase splitting by punctuation and linguistic conjunctions."""
     short_text = "这是一个短句。"
-    assert split_chinese_text_by_phrase(short_text, max_len=20) == ["这是一个短句。"]
+    assert split_chinese_text_by_phrase(short_text, max_len=20) == ["这是一个短句"]
 
     long_text = "如果你喜欢这个视频，请务必订阅我的频道并打开小铃铛。"
     parts = split_chinese_text_by_phrase(long_text, max_len=20)
     assert len(parts) == 2
-    assert parts[0] == "如果你喜欢这个视频，"
-    assert parts[1] == "请务必订阅我的频道并打开小铃铛。"
+    assert parts[0] == "如果你喜欢这个视频"
+    assert parts[1] == "请务必订阅我的频道并打开小铃铛"
 
 
 def test_split_chinese_sentence_into_cues():
@@ -163,12 +173,12 @@ def test_split_chinese_sentence_into_cues():
     )
     assert len(cues) == 2
     assert cues[0].index == 1
-    assert cues[0].target_text == "如果你喜欢这个视频，"
+    assert cues[0].target_text == "如果你喜欢这个视频"
     assert cues[0].start_ms == 1000
     assert cues[0].end_ms < 7000
 
     assert cues[1].index == 2
-    assert cues[1].target_text == "请务必订阅我的频道。"
+    assert cues[1].target_text == "请务必订阅我的频道"
     assert cues[1].end_ms == 7000
 
 
@@ -244,7 +254,7 @@ def test_generate_asynchronous_bilingual_ass():
     ]
 
     bi_ass = generate_bilingual_ass(zh_items=zh_items, en_items=en_items)
-    assert "这是整句中文翻译。" in bi_ass
+    assert "这是整句中文翻译" in bi_ass
     assert "This is part one," in bi_ass
     assert "and part two." in bi_ass
     assert "SubtitleZh" in bi_ass

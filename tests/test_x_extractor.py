@@ -79,15 +79,21 @@ def test_x_extractor_extract_raw_materials(mock_ydl_cls, mock_subproc, tmp_path)
     def fake_subprocess_run(cmd, *args, **kwargs):
         proc_mock = MagicMock()
         proc_mock.returncode = 0
+        cmd_str = " ".join(str(c) for c in cmd)
         if "ffprobe" in str(cmd[0]):
-            proc_mock.stdout = json.dumps(
-                {
-                    "streams": [
-                        {"codec_name": "h264", "codec_type": "video"},
-                        {"codec_name": "aac", "codec_type": "audio"},
-                    ]
-                }
-            )
+            if "width,height" in cmd_str:
+                proc_mock.stdout = "1080x1920\n"
+            elif "duration" in cmd_str:
+                proc_mock.stdout = "62.0\n"
+            else:
+                proc_mock.stdout = json.dumps(
+                    {
+                        "streams": [
+                            {"codec_name": "h264", "codec_type": "video"},
+                            {"codec_name": "aac", "codec_type": "audio"},
+                        ]
+                    }
+                )
         else:
             # When ffmpeg is called, write fake output files
             target_path = cmd[-1]

@@ -52,6 +52,40 @@ def is_valid_video_file(video_path: Path, ffprobe_path: str = "ffprobe") -> bool
     return False
 
 
+def get_video_dimensions(video_path: Path, ffprobe_path: str = "ffprobe") -> tuple[int, int]:
+    """Probe exact pixel width and height of a video file using ffprobe."""
+    path = Path(video_path)
+    if not path.is_file() or path.stat().st_size < 1024:
+        return (1920, 1080)
+    resolved_ffprobe = shutil.which(ffprobe_path) or ffprobe_path
+    try:
+        res = subprocess.run(
+            [
+                resolved_ffprobe,
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height",
+                "-of",
+                "csv=s=x:p=0",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            parts = res.stdout.strip().split("x")
+            if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+                return (int(parts[0]), int(parts[1]))
+    except Exception:  # noqa: BLE001, S110
+        pass
+    return (1920, 1080)
+
+
 def _ensure_fontconfig_configured() -> None:
     """Ensure fontconfig in user environment includes system / WSL font directories."""
     config_file = Path.home() / ".config" / "fontconfig" / "fonts.conf"

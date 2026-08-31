@@ -19,6 +19,7 @@ from porter_skill.extractors.base import (
     sanitize_filename,
 )
 from porter_skill.extractors.inspector import resolve_and_clean_url
+from porter_skill.synthesizer import get_video_dimensions, is_valid_video_file
 
 
 @register_extractor
@@ -166,35 +167,56 @@ class XExtractor(BasePlatformExtractor):
         )
 
         if not already_extracted:
-            raw_download_template = str(temp_dir / "download.%(ext)s")
-            format_spec = (
-                "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
-                "bestvideo[height<=1080]+bestaudio/"
-                "best[height<=1080]/best"
-            )
-            ydl_opts_download: dict[str, Any] = {
-                "format": format_spec,
-                "outtmpl": raw_download_template,
-                "merge_output_format": "mp4",
-                "remote_components": {"ejs": "github"},
-                "quiet": False,
-                "no_warnings": True,
-                "overwrites": True,
-            }
-            if cookies_file:
-                ydl_opts_download["cookiefile"] = cookies_file
-            if cookies_browser:
-                ydl_opts_download["cookiesfrombrowser"] = (cookies_browser,)
-
-            with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
-                ydl.download([canonical_url])
-
-            downloaded_files = list(temp_dir.glob("download.*"))
-            downloaded_video = None
-            for f in downloaded_files:
-                if f.suffix.lower() in [".mkv", ".mp4", ".webm", ".ts", ".flv", ".mov"]:
+            # Check if temporary download already exists and is valid from prior run
+            downloaded_video: Path | None = None
+            for f in temp_dir.glob("download.*"):
+                if f.suffix.lower() in [
+                    ".mkv",
+                    ".mp4",
+                    ".webm",
+                    ".ts",
+                    ".flv",
+                    ".mov",
+                ] and is_valid_video_file(f, ffprobe_path):
                     downloaded_video = f
+                    print(f"  ✓ Reusing existing valid temporary download: {downloaded_video.name}")
                     break
+
+            if not downloaded_video:
+                raw_download_template = str(temp_dir / "download.%(ext)s")
+                format_spec = (
+                    "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/"
+                    "bestvideo[height<=1080]+bestaudio/"
+                    "best[height<=1080]/best"
+                )
+                ydl_opts_download: dict[str, Any] = {
+                    "format": format_spec,
+                    "outtmpl": raw_download_template,
+                    "merge_output_format": "mp4",
+                    "remote_components": {"ejs": "github"},
+                    "quiet": False,
+                    "no_warnings": True,
+                    "continuedl": True,
+                    "nopart": False,
+                    "concurrent_fragment_downloads": 5,
+                    "retries": 10,
+                    "fragment_retries": 10,
+                    "buffersize": 1024 * 64,
+                    "http_chunk_size": 10485760,
+                }
+                if cookies_file:
+                    ydl_opts_download["cookiefile"] = cookies_file
+                if cookies_browser:
+                    ydl_opts_download["cookiesfrombrowser"] = (cookies_browser,)
+
+                with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
+                    ydl.download([canonical_url])
+
+                downloaded_files = list(temp_dir.glob("download.*"))
+                for f in downloaded_files:
+                    if f.suffix.lower() in [".mkv", ".mp4", ".webm", ".ts", ".flv", ".mov"]:
+                        downloaded_video = f
+                        break
 
             if not downloaded_video or not downloaded_video.exists():
                 raise RuntimeError(f"X video download failed: no media found in {temp_dir}")
@@ -293,6 +315,12 @@ class XExtractor(BasePlatformExtractor):
                 raise RuntimeError(f"Audio extraction failed:\n{proc_wav.stderr}")
         else:
             print(f"  ✓ Reusing existing standardized raw video and audio: {raw_dir}")
+
+        # Update metadata with actual standardized video dimensions
+        actual_w, actual_h = get_video_dimensions(standard_video_path, ffprobe_path)
+        metadata.width = actual_w
+        metadata.height = actual_h
+        metadata.is_vertical = actual_h > actual_w
 
         # 4. Handle Cover Art: raw/cover.jpg
         cover_path = raw_dir / "cover.jpg"

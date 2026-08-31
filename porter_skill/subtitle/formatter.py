@@ -308,14 +308,29 @@ def reconstruct_sentences_from_fragments(
     return sentences
 
 
-def split_chinese_text_by_phrase(zh_text: str, max_len: int = 20) -> list[str]:
+def clean_chinese_subtitle_punctuation(text: str) -> str:
+    """
+    Format Chinese subtitle text according to professional subtitle standards:
+    - Preserve internal commas (，), pauses (、), question marks (？), exclamation marks (！), colons (：).
+    - Remove trailing period (。) and trailing commas.
+    - Normalize whitespace and punctuation.
+    """
+    text = text.strip()
+    if not text:
+        return ""
+    # Strip trailing punctuation like 。 . ； ; ， ,
+    text = re.sub(r"[。\.；;，,]+$", "", text).strip()
+    return text
+
+
+def split_chinese_text_by_phrase(zh_text: str, max_len: int = 28) -> list[str]:
     """
     Split Chinese text naturally by punctuation and linguistic conjunctions/phrases.
     Ensures single lines don't exceed max_len while keeping phrases and words intact.
     """
     zh_text = zh_text.strip()
     if not zh_text or len(zh_text) <= max_len:
-        return [zh_text] if zh_text else []
+        return [clean_chinese_subtitle_punctuation(zh_text)] if zh_text else []
 
     # Step 1: Split on punctuation while preserving punctuation with preceding segment
     raw_pieces = re.findall(r"[^，、；。！？,;!?]+[，、；。！？,;!?]?", zh_text)
@@ -357,18 +372,18 @@ def split_chinese_text_by_phrase(zh_text: str, max_len: int = 20) -> list[str]:
     # Step 2: Merge adjacent small pieces if combined length <= max_len
     merged: list[str] = []
     if not refined_pieces:
-        return [zh_text]
+        return [clean_chinese_subtitle_punctuation(zh_text)]
 
     curr = refined_pieces[0]
     for next_p in refined_pieces[1:]:
         if len(curr) + len(next_p) <= max_len:
             curr += next_p
         else:
-            merged.append(curr)
+            merged.append(clean_chinese_subtitle_punctuation(curr))
             curr = next_p
-    merged.append(curr)
+    merged.append(clean_chinese_subtitle_punctuation(curr))
 
-    return merged
+    return [p for p in merged if p]
 
 
 def split_english_text_to_n_parts(en_text: str, n_parts: int, zh_lengths: list[int]) -> list[str]:
@@ -680,7 +695,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     if zh_items is not None and en_items is not None:
         # Dual-track asynchronous independent events
         for z in zh_items:
-            zh_clean = (z.target_text or z.source_text).replace("\n", " ").strip()
+            zh_raw = (z.target_text or z.source_text).replace("\n", " ").strip()
+            zh_clean = clean_chinese_subtitle_punctuation(zh_raw)
             if zh_clean:
                 text = f"{fade_tag}{{\\fn{style.zh_font}\\fs{style.zh_font_size}\\b1}}{zh_clean}"
                 events.append(f"Dialogue: 1,{z.start_ass},{z.end_ass},SubtitleZh,,0,0,0,,{text}")
@@ -697,14 +713,18 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end = item.end_ass
 
             if item.target_text and item.source_text and item.target_text != item.source_text:
-                zh_clean = item.target_text.replace("\n", " ").strip()
+                zh_clean = clean_chinese_subtitle_punctuation(
+                    item.target_text.replace("\n", " ").strip()
+                )
                 en_clean = item.source_text.replace("\n", " ").strip()
                 zh_text = f"{fade_tag}{{\\fn{style.zh_font}\\fs{style.zh_font_size}\\b1}}{zh_clean}"
                 en_text = f"{fade_tag}{{\\fn{style.en_font}\\fs{style.en_font_size}\\c{style.en_primary_color}&\\b0}}{en_clean}"
                 events.append(f"Dialogue: 1,{start},{end},SubtitleZh,,0,0,0,,{zh_text}")
                 events.append(f"Dialogue: 0,{start},{end},SubtitleEn,,0,0,0,,{en_text}")
             elif item.target_text:
-                clean_t = item.target_text.replace("\n", " ").strip()
+                clean_t = clean_chinese_subtitle_punctuation(
+                    item.target_text.replace("\n", " ").strip()
+                )
                 text = f"{fade_tag}{{\\fn{style.zh_font}\\fs{style.zh_font_size}\\b1}}{clean_t}"
                 events.append(f"Dialogue: 1,{start},{end},SubtitleZh,,0,0,0,,{text}")
             else:
@@ -751,7 +771,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     for item in items:
         start = item.start_ass
         end = item.end_ass
-        text = (
+        text = clean_chinese_subtitle_punctuation(
             (item.target_text if item.target_text else item.source_text).replace("\n", " ").strip()
         )
         events.append(

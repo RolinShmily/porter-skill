@@ -4,6 +4,7 @@ from porter_skill.synthesizer.burn import (
     DualReleaseResult,
     burn_dual_release,
     burn_hardsub,
+    get_video_dimensions,
     is_valid_video_file,
 )
 from porter_skill.synthesizer.utils import escape_ffmpeg_filter_path
@@ -13,5 +14,6 @@ __all__ = [
     "burn_dual_release",
     "burn_hardsub",
     "escape_ffmpeg_filter_path",
+    "get_video_dimensions",
     "is_valid_video_file",
 ]
