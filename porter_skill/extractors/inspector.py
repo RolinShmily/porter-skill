@@ -1,6 +1,7 @@
 """Pre-flight Link Inspector and URL Expansion Module."""
 
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
@@ -24,6 +25,11 @@ STRIP_QUERY_PARAMS = {
     "ref_url",
     "s",  # Twitter/X share tracking param
     "t",  # Twitter/X share tracking param (unless on youtube)
+    "is_from_webapp",
+    "sender_device",
+    "_r",
+    "is_copy_url",
+    "tt_from",
 }
 
 
@@ -115,6 +121,8 @@ def resolve_and_clean_url(url: str, timeout: float = 8.0) -> str:
         "ow.ly",
         "ift.tt",
         "ig.me",
+        "vm.tiktok.com",
+        "vt.tiktok.com",
     }
     if hostname in shortened_hosts or hostname.endswith(".t.co"):
         try:
@@ -161,6 +169,13 @@ def identify_platform(url: str) -> str:
         return "x"
     if "instagram.com" in host or "instagr.am" in host or "ig.me" in host:
         return "instagram"
+    if (
+        "tiktok.com" in host
+        or "tiktokv.com" in host
+        or "vm.tiktok.com" in host
+        or "vt.tiktok.com" in host
+    ):
+        return "tiktok"
     return "generic"
 
 
@@ -181,11 +196,16 @@ def inspect_url(
         "quiet": True,
         "no_warnings": True,
         "extract_flat": False,
+        "retries": 10,
+        "fragment_retries": 10,
         "remote_components": {"ejs": "github"},
         "extractor_args": {
             "youtube": {
                 "player_client": ["web_embedded", "web", "mweb", "android_vr", "ios", "android"]
-            }
+            },
+            "tiktok": {
+                "app_name": ["musical_ly", "trill"],
+            },
         },
     }
     if cookies_file:
@@ -193,26 +213,34 @@ def inspect_url(
     if cookies_browser:
         ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(canonical, download=False)
-    except Exception as e:  # noqa: BLE001
-        err_msg = str(e)
-        if "login" in err_msg.lower() or "authentication" in err_msg.lower():
-            err_msg = "Authentication required. Please configure cookies_browser or --cookies."
-        elif "429" in err_msg:
-            err_msg = "Rate limit (HTTP 429) encountered. Please use --cookies-from-browser."
-        elif "not found" in err_msg.lower() or "deleted" in err_msg.lower() or "404" in err_msg:
-            err_msg = "Resource not found or deleted (404)."
+    info: dict[str, Any] | None = None
+    last_err_msg: str = ""
 
-        return InspectionResult(
-            input_url=url,
-            canonical_url=canonical,
-            platform=platform,
-            is_valid=False,
-            has_video=False,
-            error_message=err_msg,
-        )
+    for attempt in range(1, 3):
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(canonical, download=False)
+                if info:
+                    break
+        except Exception as e:  # noqa: BLE001
+            err_msg = str(e)
+            if "login" in err_msg.lower() or "authentication" in err_msg.lower():
+                last_err_msg = (
+                    "Authentication required. Please configure cookies_browser or --cookies."
+                )
+                break
+            elif "429" in err_msg:
+                last_err_msg = (
+                    "Rate limit (HTTP 429) encountered. Please use --cookies-from-browser."
+                )
+            elif "not found" in err_msg.lower() or "deleted" in err_msg.lower() or "404" in err_msg:
+                last_err_msg = "Resource not found or deleted (404)."
+                break
+            else:
+                last_err_msg = err_msg
+
+            if attempt < 2:
+                time.sleep(1.0)
 
     if not info:
         return InspectionResult(
@@ -221,7 +249,7 @@ def inspect_url(
             platform=platform,
             is_valid=False,
             has_video=False,
-            error_message="Could not extract metadata from URL.",
+            error_message=last_err_msg or "Could not extract metadata from URL.",
         )
 
     # Check if video formats exist or handle carousel playlist
@@ -274,8 +302,8 @@ def inspect_url(
 
     # Title extraction & cleaning
     raw_title = info.get("title") or info.get("description") or "video"
-    # Clean leading text if on X/Twitter or Instagram
-    if platform in ("x", "instagram"):
+    # Clean leading text if on X/Twitter, Instagram, or TikTok
+    if platform in ("x", "instagram", "tiktok"):
         lines = [line.strip() for line in raw_title.splitlines() if line.strip()]
         first_line = lines[0] if lines else "video"
         # Remove URLs & leading mentions

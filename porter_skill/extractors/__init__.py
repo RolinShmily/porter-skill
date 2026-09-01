@@ -15,6 +15,7 @@ from porter_skill.extractors.inspector import (
     resolve_and_clean_url,
 )
 from porter_skill.extractors.instagram import InstagramExtractor
+from porter_skill.extractors.tiktok import TikTokExtractor
 from porter_skill.extractors.x import XExtractor
 from porter_skill.extractors.youtube import YouTubeExtractor
 
@@ -23,6 +24,7 @@ __all__ = [
     "InspectionResult",
     "InstagramExtractor",
     "RawMaterialResult",
+    "TikTokExtractor",
     "VideoMetadata",
     "XExtractor",
     "YouTubeExtractor",

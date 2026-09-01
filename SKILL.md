@@ -24,7 +24,7 @@ git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/por
 ## 核心设计与特性
 
 1. **跨平台支持与极简系统依赖**：
-   - 深度支持 **YouTube** (`youtube.com`, `youtu.be`)、**X / Twitter** (`x.com`, `twitter.com`, `t.co`) 与 **Instagram** (`instagram.com`, `instagr.am`, `ig.me` 支持 Reels/Posts/IGTV/Carousels)；
+   - 深度支持 **YouTube** (`youtube.com`, `youtu.be`)、**X / Twitter** (`x.com`, `twitter.com`, `t.co`)、**Instagram** (`instagram.com`, `instagr.am`, `ig.me`) 与 **TikTok** (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`)；
    - 依赖严格控制在标准 Python 生态与 FFmpeg 范围内；
    - 具备秒级轻量预检探针（Pre-flight Probe），1 秒内完成短链展开、追踪参数清洗与有效性校验；
    - 具备画幅自适应排版（Aspect-Ratio Aware Styling）：横屏 16:9 与竖屏 9:16 自适应断句与底边距，开箱即用 100% 成功出片。
@@ -69,7 +69,7 @@ porter-skill/
 │   ├── run_porter.py         # 免安装直接运行入口
 │   └── setup_env.sh          # 环境一键初始化脚本
 ├── porter_skill/             # Python 核心实现源码
-└── tests/                    # 70 个自动化单元与集成测试
+└── tests/                    # 78 个自动化单元与集成测试
 ```
 
 ---

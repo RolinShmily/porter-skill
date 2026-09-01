@@ -21,8 +21,8 @@
 - [x] **YouTube** (`youtube.com`, `youtu.be`) —— 深度适配（支持 1080p/4K 分离流下载、JS 签名挑战求解、多语言原生/机翻字幕提取、反爬/大会员 Cookie 会话注入）
 - [x] **X / Twitter** (`x.com`, `twitter.com`, `t.co`) —— 深度适配（支持短链重定向秒级展开、推文标题智能清洗、1080p 视频流提取、9:16 竖屏手机画幅自适应排版）
 - [x] **Instagram** (`instagram.com`, `instagr.am`, `ig.me`) —— 深度适配（支持 Reels、Posts、IGTV、多视频轮播 Carousels 智能过滤、Caption 标题语义提炼、免登录原生提取与 Embed 降级）
+- [x] **TikTok** (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`) —— 深度适配（支持 Videos、Embeds、短链展开、原生/自动字幕提取、Caption 语义标题清洗与 9:16 竖屏画幅自适应）
 - [ ] **Bilibili (哔哩哔哩)** (`bilibili.com`) —— 规划中
-- [ ] **TikTok** (`tiktok.com`) —— 规划中
 
 ---
 
