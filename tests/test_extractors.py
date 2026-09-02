@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from porter_skill.extractors.base import (
+    enhance_audio_for_asr,
     get_extractor,
     sanitize_filename,
 )
@@ -156,3 +157,29 @@ def test_youtube_extractor_mock_run(tmp_path):
         assert result.metadata.id == "test_id_123"
         assert result.metadata.safe_title == "Test_Video_Title"
         assert (result.raw_dir / "metadata.json").exists()
+
+
+def test_enhance_audio_for_asr(tmp_path):
+    """Verify 3-in-1 vocal enhancement filter execution and failure fallback."""
+    in_wav = tmp_path / "in.wav"
+    in_wav.write_bytes(b"dummy wav data")
+    out_wav = tmp_path / "out_enhanced.wav"
+
+    # 1. Successful run
+    with patch("subprocess.run") as mock_run:
+
+        def fake_ffmpeg(cmd, *args, **kwargs):
+            out_wav.write_bytes(b"enhanced audio data")
+            res = MagicMock()
+            res.returncode = 0
+            return res
+
+        mock_run.side_effect = fake_ffmpeg
+        ok = enhance_audio_for_asr(in_wav, out_wav)
+        assert ok is True
+        assert out_wav.is_file()
+        assert out_wav.read_bytes() == b"enhanced audio data"
+
+    # 2. Non-existent input file returns False
+    missing_wav = tmp_path / "missing.wav"
+    assert enhance_audio_for_asr(missing_wav, out_wav) is False

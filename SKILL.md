@@ -24,13 +24,17 @@ git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/por
 ## 核心设计与特性
 
 1. **跨平台支持与极简系统依赖**：
-   - 深度支持 **YouTube** (`youtube.com`, `youtu.be`)、**X / Twitter** (`x.com`, `twitter.com`, `t.co`)、**Instagram** (`instagram.com`, `instagr.am`, `ig.me`) 与 **TikTok** (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`)；
+   - 深度支持 **YouTube** (`youtube.com`, `youtu.be`)、**X / Twitter** (`x.com`, `twitter.com`, `t.co`)、**Instagram** (`instagram.com`, `instagr.am`, `ig.me`)、**TikTok** (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`) 与 **Bilibili** (`bilibili.com`, `b23.tv`, `bilibili.tv`)；
    - 依赖严格控制在标准 Python 生态与 FFmpeg 范围内；
    - 具备秒级轻量预检探针（Pre-flight Probe），1 秒内完成短链展开、追踪参数清洗与有效性校验；
    - 具备画幅自适应排版（Aspect-Ratio Aware Styling）：横屏 16:9 与竖屏 9:16 自适应断句与底边距，开箱即用 100% 成功出片。
-2. **通用 ASR 多引擎逐级回退（纯 Python 零 Key 兜底）**：
+2. **通用 ASR 多引擎逐级回退与广播级人声增强（双轨隔离 + 纯 Python 零 Key 闭环）**：
+   - **双轨隔离声学增强 (`raw/audio_enhanced.wav`)**：
+     - Phase 1 提取时自动应用 FFmpeg 三合一广播级人声链（80~8000Hz 人声带通 + `afftdn` 自适应 FFT 降噪 + `dynaudnorm` 动态人声均衡），专供 ASR 识别；
+     - Phase 4 最终成片压制依然保持 `-c:a copy` 直通复制原音母版（`raw/video.mp4` & `raw/audio.wav`），100% 兼顾极高 ASR 字准率与成片纯净音色；
    - 当视频无原生字幕需 ASR 时，自动按优先级链式尝试：
-     $$\text{Whisper API (若配Key)} \longrightarrow \text{Pure Python Bcut 必剪 (免Key免费)} \longrightarrow \text{Google Web STT + VAD (免Key免费)} \longrightarrow \text{VideoCaptioner CLI (可选增强)}$$
+     $$\text{Whisper API (若配Key)} \longrightarrow \text{Pure Python Bcut 必剪 (免Key免费/直连长音频)} \longrightarrow \text{Google Web STT + 双层VAD递归切片 (免Key免费)} \longrightarrow \text{VideoCaptioner CLI (可选增强)}$$
+   - **对话/访谈长音频防丢字机制**：Bcut ASR 采用独立 Session 直连并支持大音频分块上传；Google STT 具备双层 VAD + 10s 上限递归硬切片保护，彻底消除连续对话/播客场景的中后段断流丢字问题；
    - 在仅有 Python + FFmpeg 的极端环境下亦能 100% 独立完成语音转录。
 3. **分层翻译与高可用容灾（LLM ➔ Bing ➔ Google ➔ MyMemory）**：
    - **大模型增强（配置 LLM 时）**：优先使用 DeepSeek / GPT 上下文语义纠错与优化；
@@ -44,7 +48,7 @@ git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/por
 5. **解耦字幕下载与反爬容错**：
    - 字幕与音视频流下载解耦，若单一语言轨遭遇 429 不会丢弃已成功下载的源文字幕，避免误回退到慢速 ASR。
 6. **两级规范输出目录**：
-   - 一级目录 `raw/`：标准化母版视频 (`video.mp4`)、基准音轨 (`audio.wav`)、结构化台词本 (`transcript.json`, `transcript.txt`)、封面 (`cover.jpg`)、元数据 (`metadata.json`)、字幕源 (`subtitle.srt`)；
+   - 一级目录 `raw/`：标准化母版视频 (`video.mp4`)、基准音轨 (`audio.wav`)、ASR 增强音轨 (`audio_enhanced.wav`)、结构化台词本 (`transcript.json`, `transcript.txt`)、封面 (`cover.jpg`)、元数据 (`metadata.json`)、字幕源 (`subtitle.srt`)；
    - 二级目录 `cooked/`：双语/纯中文字幕 (`.srt`, `.ass`)、双语硬字幕熟肉 (`video_bilingual.mp4`)、纯中文硬字幕熟肉 (`video_zh.mp4`)。
 7. **硬件分级与自适应极速压制**：
    - 自动检测主机硬件算力（Tier A: NVENC/QSV 硬件加速、Tier B: 8+核多线程 CPU、Tier C: N100/树莓派轻量级算力）；
@@ -69,7 +73,7 @@ porter-skill/
 │   ├── run_porter.py         # 免安装直接运行入口
 │   └── setup_env.sh          # 环境一键初始化脚本
 ├── porter_skill/             # Python 核心实现源码
-└── tests/                    # 78 个自动化单元与集成测试
+└── tests/                    # 90 个自动化单元与集成测试
 ```
 
 ---
@@ -165,7 +169,7 @@ python -m porter_skill "<YOUTUBE_URL>" -o "./porter_output"
    - 包含高清下载与双版本压制的完整流水线（尤其是 $>5$ 分钟的 1080P 60fps 视频），请在 bash 工具调用时提供充足的超时时间（如 `timeout: 1200`）；
    - 若遇到单次压制超时，重新执行相同命令即可——流水线内置断点续传（Phase 1~4 Checkpointing），会自动复用已完成的母版物料与字幕，秒级恢复断点。
 3. **反爬与限流自愈**：
-   - 若遇到 YouTube 登录验证或 429 报错，主动携带浏览器 Cookie 参数重试：
+   - 若遇到 YouTube 登录验证/429、Bilibili 大会员/SESSDATA 或 412 WAF 挑战，主动携带浏览器 Cookie 参数重试：
      `python <SKILL_DIR>/scripts/run_porter.py "<URL>" -o "./porter_output" --cookies-from-browser chrome`
 4. **两阶段闭环质检验收 (Two-Stage Verification)**：
    - **字幕质检**：使用 `read` 工具抽检 `cooked/subtitle_bilingual.srt` 前 10 行，确认中文字幕行包含正常中文字符（CJK）；

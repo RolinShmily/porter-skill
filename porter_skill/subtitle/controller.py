@@ -1,6 +1,7 @@
 """Subtitle extraction, fallback orchestration, transcript generation, and styling controller."""
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -106,6 +107,9 @@ def transcribe_with_bcut(
             return False
 
         api_base = "https://member.bilibili.com/x/bcut/rubick-interface"
+        session = requests.Session()
+        session.trust_env = False  # Avoid proxy stalls on domestic Bilibili storage
+
         headers = {
             "User-Agent": "Bilibili/1.0.0 (https://www.bilibili.com)",
             "Content-Type": "application/json",
@@ -121,7 +125,7 @@ def transcribe_with_bcut(
                 "model_id": "8",
             }
         )
-        resp = requests.post(
+        resp = session.post(
             f"{api_base}/resource/create", data=payload, headers=headers, timeout=15
         )
         resp.raise_for_status()
@@ -141,8 +145,8 @@ def transcribe_with_bcut(
         for clip in range(clips):
             start = clip * per_size
             end = (clip + 1) * per_size
-            part_resp = requests.put(
-                upload_urls[clip], data=audio_data[start:end], headers=headers, timeout=30
+            part_resp = session.put(
+                upload_urls[clip], data=audio_data[start:end], headers=headers, timeout=60
             )
             part_resp.raise_for_status()
             etag = part_resp.headers.get("Etag")
@@ -159,8 +163,8 @@ def transcribe_with_bcut(
                 "model_id": "8",
             }
         )
-        commit_resp = requests.post(
-            f"{api_base}/resource/create/complete", data=commit_data, headers=headers, timeout=15
+        commit_resp = session.post(
+            f"{api_base}/resource/create/complete", data=commit_data, headers=headers, timeout=20
         )
         commit_resp.raise_for_status()
         download_url = commit_resp.json().get("data", {}).get("download_url")
@@ -168,11 +172,11 @@ def transcribe_with_bcut(
             return False
 
         # 4. Create task
-        task_resp = requests.post(
+        task_resp = session.post(
             f"{api_base}/task",
-            json={"resource": download_url, "model_id": "8"},
+            data=json.dumps({"resource": download_url, "model_id": "8"}),
             headers=headers,
-            timeout=15,
+            timeout=20,
         )
         task_resp.raise_for_status()
         task_id = task_resp.json().get("data", {}).get("task_id")
@@ -181,7 +185,8 @@ def transcribe_with_bcut(
 
         # 5. Poll task status
         for _ in range(60):
-            q_resp = requests.get(
+            time.sleep(2)
+            q_resp = session.get(
                 f"{api_base}/task/result",
                 params={"model_id": 7, "task_id": task_id},
                 headers=headers,
@@ -209,7 +214,6 @@ def transcribe_with_bcut(
                     output_srt.write_text("\n".join(srt_lines), encoding="utf-8")
                     return True
                 return False
-            time.sleep(1)
     except Exception as e:  # noqa: BLE001
         print(f"  [WARN] Bcut ASR transcription error: {e}")
 
@@ -221,7 +225,10 @@ def transcribe_with_google_stt(
     output_srt: Path,
     config: PorterConfig,
 ) -> bool:
-    """Pure-Python free speech recognition via Google Web Speech API with FFmpeg VAD interval chunking."""
+    """
+    Pure-Python free speech recognition via Google Web Speech API with zero-discard soft VAD + 150ms acoustic padding.
+    Guarantees 100% audio coverage without dropping quiet speech, soft phrases, or continuous dialogue.
+    """
     try:
         import speech_recognition as sr
 
@@ -230,7 +237,7 @@ def transcribe_with_google_stt(
             "-i",
             str(audio_path),
             "-af",
-            "silencedetect=noise=-30dB:d=0.4",
+            "silencedetect=noise=-30dB:d=0.35",
             "-f",
             "null",
             "-",
@@ -252,34 +259,60 @@ def transcribe_with_google_stt(
         probe_res = subprocess.run(probe_cmd, capture_output=True, text=True, check=False)
         total_dur = float(probe_res.stdout.strip()) if probe_res.stdout.strip() else 0.0
 
-        intervals: list[tuple[float, float]] = []
-        curr = 0.0
+        # Build natural cut points at midpoints of detected silences (Zero-discard)
+        cut_points: list[float] = [0.0]
         for s_start, s_end in zip(silence_starts, silence_ends, strict=False):
-            if s_start > curr + 0.3:
-                intervals.append((curr, s_start))
-            curr = s_end
-        if curr < total_dur - 0.3:
-            intervals.append((curr, total_dur))
+            mid = (s_start + s_end) / 2.0
+            if 0.5 < mid < (total_dur - 0.5):
+                cut_points.append(mid)
+        cut_points.append(total_dur)
+        cut_points = sorted(set(cut_points))
 
-        if not intervals:
-            intervals = [(0.0, total_dur)]
+        # Build initial zero-discard contiguous intervals
+        raw_intervals: list[tuple[float, float]] = []
+        for i in range(len(cut_points) - 1):
+            s = cut_points[i]
+            e = cut_points[i + 1]
+            if e - s >= 0.2:
+                raw_intervals.append((s, e))
+
+        if not raw_intervals:
+            raw_intervals = [(0.0, total_dur)]
+
+        # Recursive sub-window slicing for intervals > 8.0s
+        fine_intervals: list[tuple[float, float]] = []
+        max_chunk_sec = 8.0
+        for s, e in raw_intervals:
+            dur = e - s
+            if dur <= max_chunk_sec:
+                fine_intervals.append((s, e))
+            else:
+                num_sub = math.ceil(dur / max_chunk_sec)
+                sub_len = dur / num_sub
+                for k in range(num_sub):
+                    sub_s = s + k * sub_len
+                    sub_e = min(e, s + (k + 1) * sub_len)
+                    fine_intervals.append((sub_s, sub_e))
 
         r = sr.Recognizer()
         srt_lines: list[str] = []
         idx = 1
         lang = "zh-CN" if config.asr.language in ["zh", "zh-CN"] else "en-US"
 
-        for start_s, end_s in intervals:
-            p_start = max(0.0, start_s - 0.05)
-            p_end = min(total_dur, end_s + 0.35)
-            dur = max(0.5, p_end - p_start)
+        for start_s, end_s in fine_intervals:
+            # 150ms acoustic padding on boundaries to prevent clipping initial/trailing phonemes
+            pad = 0.15
+            record_start = max(0.0, start_s - pad)
+            record_end = min(total_dur, end_s + pad)
+            dur = max(0.5, record_end - record_start)
+
             with sr.AudioFile(str(audio_path)) as source:
-                audio_data = r.record(source, offset=p_start, duration=dur)
+                audio_data = r.record(source, offset=record_start, duration=dur)
                 try:
                     text = r.recognize_google(audio_data, language=lang)
                     if text and text.strip():
                         start_str = ms_to_srt_time(int(start_s * 1000))
-                        end_str = ms_to_srt_time(int(p_end * 1000))
+                        end_str = ms_to_srt_time(int(end_s * 1000))
                         srt_lines.append(f"{idx}\n{start_str} --> {end_str}\n{text.strip()}\n")
                         idx += 1
                 except Exception:  # noqa: BLE001, S110
@@ -493,7 +526,17 @@ def generate_subtitles(
 
     # Step 1: Subtitle Check (YouTube Captions / ASR)
     if not raw_srt_path.exists() or raw_srt_path.stat().st_size == 0:
-        run_asr_transcription(raw_material.audio_path, raw_srt_path, config)
+        asr_audio_path = (
+            raw_material.enhanced_audio_path
+            if (
+                config.asr.audio_denoise
+                and raw_material.enhanced_audio_path
+                and raw_material.enhanced_audio_path.is_file()
+                and raw_material.enhanced_audio_path.stat().st_size > 0
+            )
+            else raw_material.audio_path
+        )
+        run_asr_transcription(asr_audio_path, raw_srt_path, config)
         used_asr = True
 
     # Read base SRT

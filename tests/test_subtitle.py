@@ -515,12 +515,12 @@ def test_transcribe_with_bcut_mock(tmp_path):
     audio_file = tmp_path / "audio.wav"
     audio_file.write_bytes(b"dummy wav data")
     out_srt = tmp_path / "out.srt"
+    cfg = PorterConfig()
 
-    with (
-        patch("porter_skill.subtitle.controller.requests.post") as mock_post,
-        patch("porter_skill.subtitle.controller.requests.put") as mock_put,
-        patch("porter_skill.subtitle.controller.requests.get") as mock_get,
-    ):
+    with patch("porter_skill.subtitle.controller.requests.Session") as mock_session_cls:
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
         # Mock resource create
         mock_create = MagicMock()
         mock_create.status_code = 200
@@ -542,12 +542,12 @@ def test_transcribe_with_bcut_mock(tmp_path):
         mock_task.status_code = 200
         mock_task.json.return_value = {"data": {"task_id": "task_123"}}
 
-        mock_post.side_effect = [mock_create, mock_commit, mock_task]
+        mock_session.post.side_effect = [mock_create, mock_commit, mock_task]
 
         # Mock put part
         mock_put_resp = MagicMock()
         mock_put_resp.headers = {"Etag": "etag_123"}
-        mock_put.return_value = mock_put_resp
+        mock_session.put.return_value = mock_put_resp
 
         # Mock query result
         mock_q_resp = MagicMock()
@@ -564,12 +564,44 @@ def test_transcribe_with_bcut_mock(tmp_path):
                 ),
             }
         }
-        mock_get.return_value = mock_q_resp
+        mock_session.get.return_value = mock_q_resp
 
-        success = transcribe_with_bcut(audio_file, out_srt)
+        success = transcribe_with_bcut(audio_file, out_srt, cfg)
         assert success is True
         assert out_srt.is_file()
         assert "Hello from Bcut ASR" in out_srt.read_text(encoding="utf-8")
+
+
+def test_transcribe_with_google_stt_long_dialogue_mock(tmp_path):
+    """Verify Google Web Speech STT slices continuous long dialogue segments (>10s) to avoid dropouts."""
+    audio_file = tmp_path / "audio.wav"
+    audio_file.write_bytes(b"dummy wav data")
+    out_srt = tmp_path / "out.srt"
+    cfg = PorterConfig()
+
+    with (
+        patch("subprocess.run") as mock_subproc,
+        patch("speech_recognition.Recognizer") as mock_r_cls,
+        patch("speech_recognition.AudioFile"),
+    ):
+        # Mock silence detect finding no silence in 24s dialogue segment
+        mock_vad = MagicMock()
+        mock_vad.stderr = ""
+        mock_probe = MagicMock()
+        mock_probe.stdout = "24.0\n"
+        mock_subproc.side_effect = [mock_vad, mock_probe]
+
+        mock_r = MagicMock()
+        mock_r.recognize_google.return_value = "Continuous dialogue transcribed"
+        mock_r_cls.return_value = mock_r
+
+        success = transcribe_with_google_stt(audio_file, out_srt, cfg)
+        assert success is True
+        assert out_srt.is_file()
+        content = out_srt.read_text(encoding="utf-8")
+        assert "Continuous dialogue transcribed" in content
+        # Check that multiple sub-slices were recognized (e.g. 24s / 7.5s ~ 4 chunks)
+        assert mock_r.recognize_google.call_count >= 3
 
 
 def test_transcribe_with_google_stt_mock(tmp_path):
@@ -697,3 +729,47 @@ def test_compute_adaptive_subtitle_style():
     assert py_sq == 960
     assert b_sq.zh_font_size >= 55  # Boosted for square screen
     assert z_sq.zh_font_size >= 60
+
+
+def test_generate_subtitles_audio_enhanced_routing(tmp_path):
+    """Verify generate_subtitles prioritizes enhanced_audio_path when performing ASR."""
+    task_dir = tmp_path / "task"
+    raw_dir = task_dir / "raw"
+    cooked_dir = task_dir / "cooked"
+    raw_dir.mkdir(parents=True)
+    cooked_dir.mkdir(parents=True)
+
+    raw_video = raw_dir / "video.mp4"
+    raw_video.write_bytes(b"dummy video")
+    raw_audio = raw_dir / "audio.wav"
+    raw_audio.write_bytes(b"dummy wav")
+    enhanced_audio = raw_dir / "audio_enhanced.wav"
+    enhanced_audio.write_bytes(b"enhanced dummy wav")
+
+    raw_mat = RawMaterialResult(
+        task_dir=task_dir,
+        raw_dir=raw_dir,
+        video_path=raw_video,
+        audio_path=raw_audio,
+        enhanced_audio_path=enhanced_audio,
+    )
+
+    cfg = PorterConfig()
+    cfg.asr.audio_denoise = True
+
+    with patch("porter_skill.subtitle.controller.run_asr_transcription") as mock_asr:
+        mock_asr.return_value = True
+
+        # Create dummy subtitle after ASR call
+        def fake_asr(audio_p, out_srt, *args, **kwargs):
+            out_srt.write_text("1\n00:00:01,000 --> 00:00:03,000\nHello world\n")
+            return True
+
+        mock_asr.side_effect = fake_asr
+
+        generate_subtitles(raw_mat, cooked_dir, cfg)
+
+        assert mock_asr.called
+        # Verify it was called with enhanced_audio
+        called_audio_path = mock_asr.call_args[0][0]
+        assert called_audio_path == enhanced_audio

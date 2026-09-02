@@ -30,6 +30,21 @@ STRIP_QUERY_PARAMS = {
     "_r",
     "is_copy_url",
     "tt_from",
+    # Bilibili tracking parameters
+    "spm_id_from",
+    "from_spmid",
+    "vd_source",
+    "from_source",
+    "from",
+    "share_source",
+    "share_medium",
+    "share_plat",
+    "share_session_id",
+    "share_tag",
+    "bbid",
+    "ts",
+    "unique_k",
+    "rt",
 }
 
 
@@ -123,6 +138,7 @@ def resolve_and_clean_url(url: str, timeout: float = 8.0) -> str:
         "ig.me",
         "vm.tiktok.com",
         "vt.tiktok.com",
+        "b23.tv",
     }
     if hostname in shortened_hosts or hostname.endswith(".t.co"):
         try:
@@ -176,6 +192,13 @@ def identify_platform(url: str) -> str:
         or "vt.tiktok.com" in host
     ):
         return "tiktok"
+    if (
+        "bilibili.com" in host
+        or "b23.tv" in host
+        or "bilibili.tv" in host
+        or "biliintl.com" in host
+    ):
+        return "bilibili"
     return "generic"
 
 
@@ -192,6 +215,14 @@ def inspect_url(
     canonical = resolve_and_clean_url(url, timeout=timeout)
     platform = identify_platform(canonical)
 
+    referer_map = {
+        "bilibili": "https://www.bilibili.com/",
+        "tiktok": "https://www.tiktok.com/",
+        "instagram": "https://www.instagram.com/",
+        "youtube": "https://www.youtube.com/",
+        "x": "https://x.com/",
+    }
+
     ydl_opts: dict[str, Any] = {
         "quiet": True,
         "no_warnings": True,
@@ -199,6 +230,13 @@ def inspect_url(
         "retries": 10,
         "fragment_retries": 10,
         "remote_components": {"ejs": "github"},
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            ),
+            "Referer": referer_map.get(platform, "https://www.google.com/"),
+        },
         "extractor_args": {
             "youtube": {
                 "player_client": ["web_embedded", "web", "mweb", "android_vr", "ios", "android"]
@@ -216,7 +254,7 @@ def inspect_url(
     info: dict[str, Any] | None = None
     last_err_msg: str = ""
 
-    for attempt in range(1, 3):
+    for attempt in range(1, 4):
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(canonical, download=False)
@@ -229,9 +267,10 @@ def inspect_url(
                     "Authentication required. Please configure cookies_browser or --cookies."
                 )
                 break
-            elif "429" in err_msg:
+            elif "429" in err_msg or "412" in err_msg:
                 last_err_msg = (
-                    "Rate limit (HTTP 429) encountered. Please use --cookies-from-browser."
+                    "Rate limit or anti-bot challenge (HTTP 429/412) encountered. "
+                    "Please retry or use --cookies-from-browser."
                 )
             elif "not found" in err_msg.lower() or "deleted" in err_msg.lower() or "404" in err_msg:
                 last_err_msg = "Resource not found or deleted (404)."
@@ -239,8 +278,8 @@ def inspect_url(
             else:
                 last_err_msg = err_msg
 
-            if attempt < 2:
-                time.sleep(1.0)
+            if attempt < 3:
+                time.sleep(1.5 * attempt)
 
     if not info:
         return InspectionResult(
@@ -311,6 +350,12 @@ def inspect_url(
         first_line = re.sub(r"^(@\w+\s*)+", "", first_line).strip()
         first_line = re.sub(r"(#\w+\s*)+$", "", first_line).strip()
         raw_title = first_line or f"{platform.capitalize()}_video"
+    elif platform == "bilibili":
+        # Clean trailing _哔哩哔哩_bilibili / - 哔哩哔哩 / _bilibili
+        clean_bili = re.sub(
+            r"(_|\s*-\s*)(哔哩哔哩|bilibili).*", "", raw_title, flags=re.IGNORECASE
+        ).strip()
+        raw_title = clean_bili or raw_title
 
     safe_title = sanitize_filename(raw_title, max_length=60)
     video_id = str(info.get("id") or "unknown_id")

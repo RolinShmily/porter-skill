@@ -101,6 +101,28 @@ def test_burn_hardsub_real_ffmpeg(synthetic_video_and_sub, tmp_path):
     assert res.stat().st_size > 0
 
 
+def test_burn_hardsub_updates_existing_video(synthetic_video_and_sub, tmp_path):
+    """Verify burn_hardsub properly updates video when file already exists."""
+    video_in, ass_sub, _ = synthetic_video_and_sub
+    video_out = tmp_path / "output_existing.mp4"
+
+    # 1. Initial burn
+    res1 = burn_hardsub(video_in, ass_sub, video_out)
+    assert res1.exists()
+
+    # 2. Modify subtitle content
+    modified_ass = tmp_path / "modified_sub.ass"
+    modified_ass.write_text(
+        ass_sub.read_text(encoding="utf-8").replace("Hello Test", "Updated Subtitle Text"),
+        encoding="utf-8",
+    )
+
+    # 3. Second burn with overwrite=True should re-burn and update video
+    res2 = burn_hardsub(video_in, modified_ass, video_out, overwrite=True)
+    assert res2.exists()
+    assert res2.stat().st_size > 0
+
+
 def test_burn_dual_release(synthetic_video_and_sub, tmp_path):
     """Test burning dual release videos."""
     video_in, ass_sub, _ = synthetic_video_and_sub

@@ -128,6 +128,7 @@ def burn_hardsub(
     subtitle_path: Path,
     video_output: Path,
     ffmpeg_config: FFmpegConfig | None = None,
+    overwrite: bool = True,
 ) -> Path:
     """
     Burn ASS or SRT subtitle into video with -c:a copy and faststart.
@@ -142,10 +143,18 @@ def burn_hardsub(
     video_output = Path(video_output)
     video_output.parent.mkdir(parents=True, exist_ok=True)
 
-    # Check if target file already exists and is completely valid
-    if video_output.is_file() and is_valid_video_file(video_output, ffmpeg_config.ffprobe_path):
-        print(f"  ✓ Reusing existing valid release video: {video_output.name}")
-        return video_output
+    # Check if target file already exists and is completely valid and fresher than inputs when overwrite=False
+    if (
+        not overwrite
+        and video_output.is_file()
+        and is_valid_video_file(video_output, ffmpeg_config.ffprobe_path)
+    ):
+        out_mtime = video_output.stat().st_mtime
+        in_mtime = video_input.stat().st_mtime if video_input.is_file() else 0.0
+        sub_mtime = subtitle_path.stat().st_mtime if subtitle_path.is_file() else 0.0
+        if out_mtime >= in_mtime and out_mtime >= sub_mtime:
+            print(f"  ✓ Reusing existing up-to-date release video: {video_output.name}")
+            return video_output
 
     # Use atomic temporary destination
     temp_output = video_output.with_name(f".tmp_{video_output.name}")
@@ -245,6 +254,7 @@ def burn_dual_release(
     config: PorterConfig | None = None,
     only_bilingual: bool = False,
     only_zh: bool = False,
+    overwrite: bool = True,
 ) -> DualReleaseResult:
     """
     Synthesize dual-version cooked release videos:
@@ -267,6 +277,7 @@ def burn_dual_release(
             subtitle_path=bilingual_ass,
             video_output=bilingual_output,
             ffmpeg_config=config.ffmpeg,
+            overwrite=overwrite,
         )
         result.video_bilingual = bilingual_output
 
@@ -278,6 +289,7 @@ def burn_dual_release(
             subtitle_path=zh_ass,
             video_output=zh_output,
             ffmpeg_config=config.ffmpeg,
+            overwrite=overwrite,
         )
         result.video_zh = zh_output
 

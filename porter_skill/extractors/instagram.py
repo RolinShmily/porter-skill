@@ -15,6 +15,7 @@ from porter_skill.extractors.base import (
     BasePlatformExtractor,
     RawMaterialResult,
     VideoMetadata,
+    enhance_audio_for_asr,
     register_extractor,
     sanitize_filename,
 )
@@ -276,6 +277,7 @@ class InstagramExtractor(BasePlatformExtractor):
         # Resumption Check: If raw materials already exist and are valid, reuse directly
         standard_video_path = raw_dir / "video.mp4"
         standard_audio_path = raw_dir / "audio.wav"
+        standard_enhanced_audio_path = raw_dir / "audio_enhanced.wav"
         standard_cover_path = raw_dir / "cover.jpg"
         metadata_path = raw_dir / "metadata.json"
 
@@ -287,11 +289,18 @@ class InstagramExtractor(BasePlatformExtractor):
             metadata_path.write_text(
                 json.dumps(metadata.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            cached_enhanced_audio = (
+                standard_enhanced_audio_path
+                if standard_enhanced_audio_path.is_file()
+                and standard_enhanced_audio_path.stat().st_size > 0
+                else None
+            )
             return RawMaterialResult(
                 task_dir=task_dir,
                 raw_dir=raw_dir,
                 video_path=standard_video_path,
                 audio_path=standard_audio_path,
+                enhanced_audio_path=cached_enhanced_audio,
                 cover_path=standard_cover_path if standard_cover_path.is_file() else None,
                 subtitle_path=None,
                 metadata_path=metadata_path,
@@ -381,6 +390,14 @@ class InstagramExtractor(BasePlatformExtractor):
         if res_a.returncode != 0 or not standard_audio_path.is_file():
             raise RuntimeError(f"FFmpeg audio extraction failed for Instagram: {res_a.stderr}")
 
+        # Standardize ASR audio enhancement: raw/audio_enhanced.wav
+        enhanced_audio_path: Path | None = None
+        if (
+            standard_enhanced_audio_path.is_file()
+            and standard_enhanced_audio_path.stat().st_size > 0
+        ) or enhance_audio_for_asr(standard_audio_path, standard_enhanced_audio_path, ffmpeg_path):
+            enhanced_audio_path = standard_enhanced_audio_path
+
         # Process thumbnail / cover
         downloaded_covers = [
             f
@@ -437,6 +454,7 @@ class InstagramExtractor(BasePlatformExtractor):
             raw_dir=raw_dir,
             video_path=standard_video_path,
             audio_path=standard_audio_path,
+            enhanced_audio_path=enhanced_audio_path,
             cover_path=standard_cover_path if standard_cover_path.is_file() else None,
             subtitle_path=None,
             metadata_path=metadata_path,

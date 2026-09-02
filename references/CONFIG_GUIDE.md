@@ -33,7 +33,8 @@ Configurations are resolved using cascading priority (highest to lowest):
     "language": "auto",
     "whisper_api_key": "sk-...",
     "whisper_api_base": "https://api.openai.com/v1",
-    "whisper_model": "whisper-1"
+    "whisper_model": "whisper-1",
+    "audio_denoise": true
   },
   "style": {
     "zh_font": "Microsoft YaHei",

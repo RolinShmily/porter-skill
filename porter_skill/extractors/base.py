@@ -1,6 +1,7 @@
 """Base classes and factory for platform media extractors."""
 
 import re
+import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -42,6 +43,7 @@ class RawMaterialResult:
     raw_dir: Path
     video_path: Path
     audio_path: Path
+    enhanced_audio_path: Path | None = None
     cover_path: Path | None = None
     subtitle_path: Path | None = None
     subtitle_zh_path: Path | None = None
@@ -63,6 +65,51 @@ def sanitize_filename(name: str, max_length: int = 80) -> str:
     if len(sanitized) > max_length:
         sanitized = sanitized[:max_length].rstrip("._ ")
     return sanitized
+
+
+def enhance_audio_for_asr(
+    input_wav: Path,
+    output_wav: Path,
+    ffmpeg_path: str = "ffmpeg",
+) -> bool:
+    """
+    Apply 3-in-1 broadcasting vocal enhancement filter chain via FFmpeg:
+    1. Bandpass filter (80Hz - 8000Hz): removes low-frequency mic pops/rumble (<80Hz) and high-frequency hiss (>8kHz).
+    2. afftdn (Adaptive FFT Denoise): removes stationary background noise with 0 external dependencies.
+    3. dynaudnorm (Dynamic Audio Normalization): balances soft/loud vocal volume variations for clear ASR recognition.
+
+    Returns True if enhanced WAV was successfully generated.
+    """
+    if not input_wav.is_file() or input_wav.stat().st_size == 0:
+        return False
+
+    filter_chain = "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,dynaudnorm=f=150:g=15:p=0.95"
+    cmd = [
+        ffmpeg_path,
+        "-y",
+        "-i",
+        str(input_wav),
+        "-vn",
+        "-af",
+        filter_chain,
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        str(output_wav),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        if proc.returncode == 0 and output_wav.is_file() and output_wav.stat().st_size > 0:
+            return True
+        print(
+            f"  [WARN] Audio enhancement warning: {proc.stderr[:200] if proc.stderr else 'Unknown'}"
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"  [WARN] Audio enhancement failed: {e}")
+    return False
 
 
 class BasePlatformExtractor(ABC):

@@ -4,10 +4,12 @@ from porter_skill.extractors.base import (
     BasePlatformExtractor,
     RawMaterialResult,
     VideoMetadata,
+    enhance_audio_for_asr,
     get_extractor,
     register_extractor,
     sanitize_filename,
 )
+from porter_skill.extractors.bilibili import BilibiliExtractor
 from porter_skill.extractors.inspector import (
     InspectionResult,
     identify_platform,
@@ -21,6 +23,7 @@ from porter_skill.extractors.youtube import YouTubeExtractor
 
 __all__ = [
     "BasePlatformExtractor",
+    "BilibiliExtractor",
     "InspectionResult",
     "InstagramExtractor",
     "RawMaterialResult",
@@ -28,6 +31,7 @@ __all__ = [
     "VideoMetadata",
     "XExtractor",
     "YouTubeExtractor",
+    "enhance_audio_for_asr",
     "get_extractor",
     "identify_platform",
     "inspect_url",

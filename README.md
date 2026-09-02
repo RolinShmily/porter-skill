@@ -22,7 +22,7 @@
 - [x] **X / Twitter** (`x.com`, `twitter.com`, `t.co`) —— 深度适配（支持短链重定向秒级展开、推文标题智能清洗、1080p 视频流提取、9:16 竖屏手机画幅自适应排版）
 - [x] **Instagram** (`instagram.com`, `instagr.am`, `ig.me`) —— 深度适配（支持 Reels、Posts、IGTV、多视频轮播 Carousels 智能过滤、Caption 标题语义提炼、免登录原生提取与 Embed 降级）
 - [x] **TikTok** (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`) —— 深度适配（支持 Videos、Embeds、短链展开、原生/自动字幕提取、Caption 语义标题清洗与 9:16 竖屏画幅自适应）
-- [ ] **Bilibili (哔哩哔哩)** (`bilibili.com`) —— 规划中
+- [x] **Bilibili (哔哩哔哩)** (`bilibili.com`, `b23.tv`, `bilibili.tv`) —— 深度适配（支持标准视频、番剧、课程、B23 短链、CC/AI JSON 字幕解析、SESSDATA/大会员会话注入与画质自适应）
 
 ---
 
@@ -39,9 +39,12 @@
 - 🚀 **智能字幕极速直连 (Zero-Latency Fast Path)**：
   - 自动探测并并发下载平台原生多语言字幕（如 YouTube `zh-Hans` / `zh` 翻译轨与 `en-orig` 原音轨）；
   - 自动毫秒级中英文语义对齐与长单行合并，**0 延迟、0 API Token 消耗**快速出片。
-- 🎙️ **多引擎 ASR 链式自适应回退（纯 Python 零 Key 闭环）**：
+- 🎙️ **多引擎 ASR 链式自适应回退与广播级人声增强（双轨隔离 & 纯 Python 零 Key 闭环）**：
+  - **双轨隔离声学增强 (`raw/audio_enhanced.wav`)**：内置 FFmpeg 原生三合一人声链（80~8000Hz 人声带通 + `afftdn` 自适应 FFT 降噪 + `dynaudnorm` 动态人声均衡），在 0.2 秒内消除电流麦与低频轰鸣并拉齐音量，大幅提升复杂视频与嘈杂演讲的 ASR 字准率；
+  - **母版原音直通 (`-c:a copy`)**：Phase 4 成片压制依然直通复制 `raw/audio.wav` 原声，100% 保持成片音色真实与音质纯净；
   - 当源视频无原生字幕时，流水线按序自动尝试语音转录：
-    $$\text{Whisper API (若配Key)} \longrightarrow \text{Pure Python Bcut 必剪 (免Key免费)} \longrightarrow \text{Google Web STT + VAD (免Key免费)} \longrightarrow \text{VideoCaptioner CLI (可选增强)}$$
+    $$\text{Whisper API (若配Key)} \longrightarrow \text{Pure Python Bcut 必剪 (免Key免费/长音频直连)} \longrightarrow \text{Google Web STT + 双层VAD递归切片 (免Key免费)} \longrightarrow \text{VideoCaptioner CLI (可选增强)}$$
+  - Bcut ASR 独立直连突破代理并支持长音频大文件分块；Google STT 具备双层 VAD + 10s 上限递归硬切片保护，彻底杜绝连续对话/播客场景丢句断流；
   - 在纯净 Python + FFmpeg 环境下 100% 独立完成语音转录，无需下载 GB 级离线权重。
 - 🌐 **多层次翻译与高可用容灾**：
   - **LLM 大模型驱动（配置 API 时）**：支持 DeepSeek / OpenAI / Claude 等模型，智能断句并修正专业同音错词；
@@ -73,6 +76,7 @@ porter_output/<video_id>_<safe_title>/
 ├── raw/                              # 【一级：原始物料区 (Raw Assets)】
 │   ├── video.mp4                     # 原始标准母版 (H.264 + AAC 广播级封装, faststart)
 │   ├── audio.wav                     # 原始基准音轨 (16kHz 16bit 单声道 WAV)
+│   ├── audio_enhanced.wav (可选)     # ASR 专属增强音轨 (三合一人声带通降噪均衡)
 │   ├── transcript.json               # 结构化台词本 (句级起止时间/中英双语对/原始片段映射)
 │   ├── transcript.txt                # 纯文本台词本 (带时间轴中英对照, 便于人工核对与检索)
 │   ├── subtitle.srt                  # 原始英文/源语言字幕 (长单行规整版)

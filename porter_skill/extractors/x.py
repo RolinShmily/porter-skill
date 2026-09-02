@@ -15,6 +15,7 @@ from porter_skill.extractors.base import (
     BasePlatformExtractor,
     RawMaterialResult,
     VideoMetadata,
+    enhance_audio_for_asr,
     register_extractor,
     sanitize_filename,
 )
@@ -316,6 +317,15 @@ class XExtractor(BasePlatformExtractor):
         else:
             print(f"  ✓ Reusing existing standardized raw video and audio: {raw_dir}")
 
+        # 3.1 ASR Vocal Enhancement: raw/audio_enhanced.wav
+        standard_enhanced_audio_path = raw_dir / "audio_enhanced.wav"
+        enhanced_audio_path: Path | None = None
+        if (
+            standard_enhanced_audio_path.is_file()
+            and standard_enhanced_audio_path.stat().st_size > 0
+        ) or enhance_audio_for_asr(standard_audio_path, standard_enhanced_audio_path, ffmpeg_path):
+            enhanced_audio_path = standard_enhanced_audio_path
+
         # Update metadata with actual standardized video dimensions
         actual_w, actual_h = get_video_dimensions(standard_video_path, ffprobe_path)
         metadata.width = actual_w
@@ -363,6 +373,7 @@ class XExtractor(BasePlatformExtractor):
             raw_dir=raw_dir,
             video_path=standard_video_path,
             audio_path=standard_audio_path,
+            enhanced_audio_path=enhanced_audio_path,
             cover_path=cover_path if cover_path.exists() else None,
             subtitle_path=subtitle_path if (subtitle_path and subtitle_path.exists()) else None,
             metadata_path=metadata_path,

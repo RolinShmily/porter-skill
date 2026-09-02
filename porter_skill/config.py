@@ -25,6 +25,7 @@ class ASRConfig(BaseModel):
     whisper_api_key: str | None = None
     whisper_api_base: str | None = None
     whisper_model: str = "whisper-1"
+    audio_denoise: bool = True
 
 
 class FFmpegConfig(BaseModel):

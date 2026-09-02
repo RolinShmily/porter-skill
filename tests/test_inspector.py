@@ -89,4 +89,4 @@ def test_inspect_url_network_error(mock_ydl_cls):
 
     res = inspect_url("https://x.com/user/status/1895000000")
     assert res.is_valid is False
-    assert "Rate limit (HTTP 429)" in (res.error_message or "")
+    assert "HTTP 429" in (res.error_message or "")

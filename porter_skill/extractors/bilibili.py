@@ -1,4 +1,4 @@
-"""TikTok platform material extractor (Videos, Shorts, Embeds, Slideshows)."""
+"""Bilibili platform material extractor (Videos, Bangumi, Cheese, Opus, Shortlinks)."""
 
 import json
 import re
@@ -21,13 +21,14 @@ from porter_skill.extractors.base import (
     sanitize_filename,
 )
 from porter_skill.extractors.inspector import resolve_and_clean_url
+from porter_skill.subtitle.formatter import ms_to_srt_time
 from porter_skill.synthesizer import get_video_dimensions, is_valid_video_file
 
 
 def _convert_vtt_to_srt(vtt_content: str) -> str:
     """Convert WebVTT text content to SubRip SRT format."""
     lines = vtt_content.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    srt_blocks = []
+    srt_blocks: list[str] = []
     block_num = 1
 
     time_pattern = re.compile(
@@ -71,87 +72,106 @@ def _convert_vtt_to_srt(vtt_content: str) -> str:
     return "\n\n".join(srt_blocks) + ("\n" if srt_blocks else "")
 
 
-@register_extractor
-class TikTokExtractor(BasePlatformExtractor):
-    """Extractor for TikTok video content (Videos, Embeds, Shares, Shortlinks)."""
+def _convert_bilibili_json_to_srt(json_content: str) -> str:
+    """Convert Bilibili JSON CC subtitle body to standard SRT format."""
+    try:
+        data = json.loads(json_content)
+        body = data.get("body") or []
+        if not isinstance(body, list):
+            return ""
 
-    TIKTOK_URL_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
-        # Standard video: tiktok.com/@user/video/1234567890
-        re.compile(r"^https?://(?:(?:www|m)\.)?tiktok\.com/@(?P<user>[\w\.-]+)/video/(?P<id>\d+)"),
-        # Photo post: tiktok.com/@user/photo/1234567890
-        re.compile(r"^https?://(?:(?:www|m)\.)?tiktok\.com/@(?P<user>[\w\.-]+)/photo/(?P<id>\d+)"),
-        # Embed / Share / v / t endpoints
+        srt_blocks: list[str] = []
+        block_idx = 1
+        for item in body:
+            if not isinstance(item, dict):
+                continue
+            from_val = item.get("from")
+            to_val = item.get("to")
+            content = str(item.get("content") or "").strip()
+            if from_val is not None and to_val is not None and content:
+                start_ms = max(0, int(float(from_val) * 1000))
+                end_ms = max(start_ms + 100, int(float(to_val) * 1000))
+                start_time = ms_to_srt_time(start_ms)
+                end_time = ms_to_srt_time(end_ms)
+                srt_blocks.append(f"{block_idx}\n{start_time} --> {end_time}\n{content}")
+                block_idx += 1
+
+        return "\n\n".join(srt_blocks) + ("\n" if srt_blocks else "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+@register_extractor
+class BilibiliExtractor(BasePlatformExtractor):
+    """Extractor for Bilibili video content (Videos, Bangumi, Cheese, Opus, Shortlinks)."""
+
+    BILIBILI_URL_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
+        # Standard video: bilibili.com/video/BV1... or av...
         re.compile(
-            r"^https?://(?:(?:www|m)\.)?tiktok\.com/(?:embed(?:/v2)?|share/video|v)/(?P<id>\d+)"
+            r"^https?://(?:(?:www|m)\.)?bilibili\.com/(?:video/|festival/[^/?#]+\?(?:[^#]*&)?bvid=)(?P<id>[a-zA-Z0-9]+)"
         ),
-        # Mobile app shortlinks: vm.tiktok.com/ID or vt.tiktok.com/ID
-        re.compile(r"^https?://(?:vm|vt)\.tiktok\.com/(?P<id>[\w-]+)"),
-        # Shortened share links: tiktok.com/t/ID
-        re.compile(r"^https?://(?:(?:www|m)\.)?tiktok\.com/t/(?P<id>[\w-]+)"),
+        # Bangumi: bilibili.com/bangumi/play/ep... or ss...
+        re.compile(r"^https?://(?:(?:www|m)\.)?bilibili\.com/bangumi/play/(?P<id>(?:ep|ss)\d+)"),
+        # Cheese / Courses: bilibili.com/cheese/play/ep... or ss...
+        re.compile(r"^https?://(?:(?:www|m)\.)?bilibili\.com/cheese/play/(?P<id>(?:ep|ss)\d+)"),
+        # Short links: b23.tv/ID
+        re.compile(r"^https?://(?:www\.)?b23\.tv/(?P<id>[a-zA-Z0-9]+)"),
+        # International: bilibili.tv / biliintl.com
+        re.compile(
+            r"^https?://(?:(?:www)\.)?bili(?:bili\.tv|intl\.com)/(?:[a-zA-Z]{2}/)?(?:play|video)/(?P<id>\d+)"
+        ),
+        # Opus / Dynamic: t.bilibili.com/ID or bilibili.com/opus/ID
+        re.compile(r"^https?://(?:t\.bilibili\.com|(?:www\.)?bilibili\.com/opus)/(?P<id>\d+)"),
     ]
 
     def can_handle(self, url: str) -> bool:
-        """Check if URL belongs to TikTok platform."""
-        for pattern in self.TIKTOK_URL_PATTERNS:
+        """Check if URL belongs to Bilibili platform."""
+        for pattern in self.BILIBILI_URL_PATTERNS:
             if pattern.search(url):
                 return True
         return (
-            "tiktok.com" in url
-            or "tiktokv.com" in url
-            or "vm.tiktok.com" in url
-            or "vt.tiktok.com" in url
+            "bilibili.com" in url
+            or "b23.tv" in url
+            or "bilibili.tv" in url
+            or "biliintl.com" in url
         )
 
-    def _clean_caption_to_title(
-        self, caption: str | None, uploader: str | None, post_id: str
-    ) -> str:
-        """Derive a clean, concise, safe title from TikTok caption text."""
-        if not caption:
-            return f"TikTok_by_{uploader or post_id}"
+    def _clean_title(self, raw_title: str | None, bvid: str) -> str:
+        """Derive a clean, concise, safe title from Bilibili title text."""
+        if not raw_title:
+            return f"bilibili_{bvid}"
 
-        # 1. Remove URLs
-        cleaned = re.sub(r"https?://\S+", "", caption).strip()
+        # Clean trailing _哔哩哔哩_bilibili / - 哔哩哔哩 / _bilibili
+        clean = re.sub(
+            r"(_|\s*-\s*)(哔哩哔哩|bilibili).*", "", raw_title, flags=re.IGNORECASE
+        ).strip()
+        # Clean URLs if present
+        clean = re.sub(r"https?://\S+", "", clean).strip()
 
-        # 2. Extract non-empty lines
-        lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
-        if not lines:
-            return f"TikTok_by_{uploader or post_id}"
+        if not clean:
+            return f"bilibili_{bvid}"
 
-        # 3. Take first line and strip mentions and trailing hashtags
-        first_line = lines[0]
-        first_line = re.sub(r"^(@\w+\s*)+", "", first_line).strip()
-        first_line = re.sub(r"(#\w+\s*)+$", "", first_line).strip()
-
-        # If first line was purely hashtags, try remaining text without hashtags
-        if not first_line:
-            no_hashtags = re.sub(r"#\w+", "", cleaned).strip()
-            lines_no_tag = [line.strip() for line in no_hashtags.splitlines() if line.strip()]
-            if lines_no_tag:
-                first_line = lines_no_tag[0]
-
-        if not first_line:
-            return f"TikTok_by_{uploader or post_id}"
-
-        return first_line[:50].strip()
+        return clean[:60].strip()
 
     def _select_source_subtitle_lang(self, subtitles_dict: dict[str, Any]) -> str | None:
         """Select preferred source speech subtitle language code."""
         if not subtitles_dict:
             return None
 
-        # 1. Check for original speech tags
+        # 1. Prioritize original speech tags
         for k in subtitles_dict:
             if k.endswith(("-orig", "-original")):
                 return k
 
-        # 2. Prefer standard English variants or source
+        # 2. Preferred languages (prioritize English/Foreign if source, or Chinese)
         preferred_langs = [
             "en",
             "en-US",
             "en-GB",
-            "en-CA",
-            "zh-Hans",
             "zh-CN",
+            "zh-Hans",
+            "zh-Hans-CN",
+            "ai-zh",
             "zh",
             "ja",
             "ko",
@@ -171,14 +191,15 @@ class TikTokExtractor(BasePlatformExtractor):
         return next(iter(subtitles_dict.keys()), None)
 
     def _select_chinese_subtitle_lang(self, subtitles_dict: dict[str, Any]) -> str | None:
-        """Select preferred Chinese translation subtitle track if available."""
+        """Select preferred Chinese translation or official track if available."""
         if not subtitles_dict:
             return None
 
         zh_preferred = [
-            "zh-Hans",
             "zh-CN",
+            "zh-Hans",
             "zh-Hans-CN",
+            "ai-zh",
             "zh",
             "zh-Hant",
             "zh-TW",
@@ -191,7 +212,7 @@ class TikTokExtractor(BasePlatformExtractor):
 
         for k in subtitles_dict:
             lower_k = k.lower()
-            if lower_k.startswith("zh") or "chinese" in lower_k:
+            if lower_k.startswith("zh") or "chinese" in lower_k or "中文" in lower_k:
                 return k
 
         return None
@@ -204,7 +225,7 @@ class TikTokExtractor(BasePlatformExtractor):
         cookies_file: str | None = None,
         cookies_browser: str | None = None,
     ) -> RawMaterialResult:
-        """Extract and standardize TikTok video materials into raw/ directory."""
+        """Extract and standardize Bilibili video materials into raw/ directory."""
         output_base_dir = Path(output_base_dir)
         output_base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -217,10 +238,12 @@ class TikTokExtractor(BasePlatformExtractor):
             "extract_flat": False,
             "retries": 10,
             "fragment_retries": 10,
-            "extractor_args": {
-                "tiktok": {
-                    "app_name": ["musical_ly", "trill"],
-                }
+            "http_headers": {
+                "Referer": "https://www.bilibili.com/",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                ),
             },
         }
         if cookies_file:
@@ -242,12 +265,13 @@ class TikTokExtractor(BasePlatformExtractor):
                 err_str = str(e)
                 if (
                     "login" in err_str.lower()
-                    or "captcha" in err_str.lower()
-                    or "checkpoint" in err_str.lower()
+                    or "sessdata" in err_str.lower()
+                    or "大会员" in err_str
+                    or "permission" in err_str.lower()
                 ):
                     raise RuntimeError(
-                        f"TikTok platform access restricted / login required for {url}: {err_str}\n"
-                        "Tip: TikTok requires authentication or encountered anti-scraping checks. "
+                        f"Bilibili video access restricted / login required for {url}: {err_str}\n"
+                        "Tip: Bilibili requires authentication (e.g. 1080p+ / 大会员 / SESSDATA). "
                         "Please pass browser cookies using --cookies-from-browser chrome / edge / firefox."
                     ) from e
                 if attempt < 3:
@@ -255,29 +279,16 @@ class TikTokExtractor(BasePlatformExtractor):
 
         if not info:
             raise RuntimeError(
-                f"Failed to fetch metadata from TikTok URL {url}: {last_err}"
+                f"Failed to fetch metadata from Bilibili URL {url}: {last_err}"
             ) from last_err
 
-        # Check if slideshow containing only images without video stream
-        if info.get("_type") == "playlist" and not info.get("formats"):
-            entries = info.get("entries") or []
-            has_video = any(
-                entry.get("formats")
-                for entry in entries
-                if isinstance(entry, dict) and entry.get("formats")
-            )
-            if not has_video:
-                raise RuntimeError(
-                    f"TikTok post {url} is a photo slideshow without a downloadable video stream."
-                )
+        bvid = str(info.get("id") or "video")
+        uploader = info.get("uploader") or info.get("uploader_id") or "up_user"
+        raw_title = info.get("title") or ""
+        clean_title = self._clean_title(raw_title, bvid)
+        safe_title = sanitize_filename(clean_title, max_length=60)
 
-        video_id = str(info.get("id") or "video")
-        uploader = info.get("uploader") or info.get("uploader_id") or "creator"
-        caption = info.get("title") or info.get("description") or ""
-        clean_title = self._clean_caption_to_title(caption, uploader, video_id)
-        safe_title = sanitize_filename(clean_title, max_length=50)
-
-        task_dir_name = f"{video_id}_{safe_title}"
+        task_dir_name = f"{bvid}_{safe_title}"
         task_dir = output_base_dir / task_dir_name
         raw_dir = task_dir / "raw"
         raw_dir.mkdir(parents=True, exist_ok=True)
@@ -321,17 +332,16 @@ class TikTokExtractor(BasePlatformExtractor):
         duration = float(info.get("duration") or 0.0)
         width = info.get("width")
         height = info.get("height")
-        # TikTok defaults to vertical 9:16 unless width > height
-        is_vertical = True
-        if width and height and width > height:
-            is_vertical = False
+        is_vertical = False
+        if width and height and height > width:
+            is_vertical = True
 
         metadata = VideoMetadata(
-            id=video_id,
-            title=caption or clean_title,
+            id=bvid,
+            title=raw_title or clean_title,
             safe_title=safe_title,
             url=canonical_url,
-            platform="tiktok",
+            platform="bilibili",
             uploader=uploader,
             channel=info.get("channel"),
             duration=duration,
@@ -342,15 +352,15 @@ class TikTokExtractor(BasePlatformExtractor):
             thumbnail_url=info.get("thumbnail"),
             has_official_subtitle=bool(info.get("subtitles") or info.get("automatic_captions")),
             raw_metadata={
-                "id": video_id,
-                "title": caption or clean_title,
+                "id": bvid,
+                "title": raw_title or clean_title,
                 "uploader": uploader,
                 "duration": duration,
                 "width": width,
                 "height": height,
                 "view_count": info.get("view_count"),
                 "like_count": info.get("like_count"),
-                "comment_count": info.get("comment_count"),
+                "danmaku_count": info.get("comment_count"),
             },
         )
 
@@ -361,20 +371,27 @@ class TikTokExtractor(BasePlatformExtractor):
 
         ydl_opts_download: dict[str, Any] = {
             "outtmpl": temp_video_tmpl,
-            "format": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best[height<=1080]/best",
+            "format": (
+                "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/"
+                "bestvideo[height<=1080]+bestaudio/"
+                "best[ext=mp4][height<=1080]/"
+                "best[height<=1080]/best"
+            ),
             "writesubtitles": True,
             "writeautomaticsub": True,
-            "subtitlesformat": "vtt/srt/best",
+            "subtitlesformat": "srt/vtt/json/best",
             "subtitleslangs": ["all"],
             "quiet": True,
             "no_warnings": True,
             "ignoreerrors": "only_download",
             "retries": 10,
             "fragment_retries": 10,
-            "extractor_args": {
-                "tiktok": {
-                    "app_name": ["musical_ly", "trill"],
-                }
+            "http_headers": {
+                "Referer": "https://www.bilibili.com/",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                ),
             },
         }
         if cookies_file:
@@ -385,9 +402,13 @@ class TikTokExtractor(BasePlatformExtractor):
         # Check existing valid download before re-downloading
         downloaded_video: Path | None = None
         for cand in temp_dir.glob("*.*"):
-            if cand.suffix.lower() in (".mp4", ".mkv", ".webm", ".mov") and is_valid_video_file(
-                cand, ffmpeg_path.replace("ffmpeg", "ffprobe")
-            ):
+            if cand.suffix.lower() in (
+                ".mp4",
+                ".mkv",
+                ".webm",
+                ".flv",
+                ".mov",
+            ) and is_valid_video_file(cand, ffmpeg_path.replace("ffmpeg", "ffprobe")):
                 downloaded_video = cand
                 break
 
@@ -396,29 +417,29 @@ class TikTokExtractor(BasePlatformExtractor):
                 with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
                     ydl.download([canonical_url])
             except Exception as e:  # noqa: BLE001
-                # If download fails, retry with base format
+                # Retry with fallback format
                 try:
                     ydl_opts_download["format"] = "best"
                     with yt_dlp.YoutubeDL(ydl_opts_download) as ydl:
                         ydl.download([canonical_url])
                 except Exception as retry_err:
                     raise RuntimeError(
-                        f"Failed to download media stream from TikTok: {e}\nRetry error: {retry_err}"
+                        f"Failed to download media stream from Bilibili: {e}\nRetry error: {retry_err}"
                     ) from retry_err
 
             downloaded_videos = [
                 f
                 for f in temp_dir.glob("*.*")
-                if f.suffix.lower() in (".mp4", ".mkv", ".webm", ".mov")
+                if f.suffix.lower() in (".mp4", ".mkv", ".webm", ".flv", ".mov")
                 and is_valid_video_file(f, ffmpeg_path.replace("ffmpeg", "ffprobe"))
             ]
             if not downloaded_videos:
                 raise RuntimeError(
-                    f"No video file found in temporary directory after TikTok download: {temp_dir}"
+                    f"No video file found in temporary directory after Bilibili download: {temp_dir}"
                 )
             downloaded_video = downloaded_videos[0]
 
-        # 3. Standardize video to H.264 + AAC MP4 (fast remux if already h264/aac)
+        # 3. Standardize video to H.264 + AAC MP4
         cmd_v = [
             ffmpeg_path,
             "-y",
@@ -442,7 +463,7 @@ class TikTokExtractor(BasePlatformExtractor):
         ]
         res_v = subprocess.run(cmd_v, capture_output=True, text=True, check=False)
         if res_v.returncode != 0:
-            raise RuntimeError(f"FFmpeg video standardization failed for TikTok: {res_v.stderr}")
+            raise RuntimeError(f"FFmpeg video standardization failed for Bilibili: {res_v.stderr}")
 
         # 4. Extract 16kHz Mono WAV Audio
         cmd_a = [
@@ -461,7 +482,7 @@ class TikTokExtractor(BasePlatformExtractor):
         ]
         res_a = subprocess.run(cmd_a, capture_output=True, text=True, check=False)
         if res_a.returncode != 0:
-            raise RuntimeError(f"FFmpeg audio extraction failed for TikTok: {res_a.stderr}")
+            raise RuntimeError(f"FFmpeg audio extraction failed for Bilibili: {res_a.stderr}")
 
         # 4.1 ASR Vocal Enhancement: raw/audio_enhanced.wav
         enhanced_audio_path: Path | None = None
@@ -475,7 +496,8 @@ class TikTokExtractor(BasePlatformExtractor):
         thumbnail_url = info.get("thumbnail")
         if thumbnail_url:
             try:
-                resp = requests.get(thumbnail_url, timeout=10)
+                headers = {"Referer": "https://www.bilibili.com/"}
+                resp = requests.get(thumbnail_url, headers=headers, timeout=10)
                 if resp.status_code == 200:
                     cover_temp = temp_dir / "cover_raw"
                     cover_temp.write_bytes(resp.content)
@@ -512,28 +534,29 @@ class TikTokExtractor(BasePlatformExtractor):
         # Search downloaded subtitle files in temp directory
         for f in temp_dir.glob("*.*"):
             s_ext = f.suffix.lower()
-            if s_ext in (".vtt", ".srt"):
+            if s_ext in (".vtt", ".srt", ".json"):
                 fname = f.name.lower()
                 if zh_lang and zh_lang.lower() in fname:
                     found_zh_sub_path = f
                 elif (source_lang and source_lang.lower() in fname) or not found_sub_path:
                     found_sub_path = f
 
+        def _load_to_srt(file_path: Path) -> str:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+            ext = file_path.suffix.lower()
+            if ext == ".vtt":
+                return _convert_vtt_to_srt(content)
+            if ext == ".json":
+                return _convert_bilibili_json_to_srt(content)
+            return content
+
         if found_sub_path and found_sub_path.is_file():
-            raw_text = found_sub_path.read_text(encoding="utf-8", errors="replace")
-            if found_sub_path.suffix.lower() == ".vtt":
-                srt_content = _convert_vtt_to_srt(raw_text)
-            else:
-                srt_content = raw_text
+            srt_content = _load_to_srt(found_sub_path)
             if srt_content.strip():
                 source_srt_path.write_text(srt_content, encoding="utf-8")
 
         if found_zh_sub_path and found_zh_sub_path.is_file():
-            raw_zh_text = found_zh_sub_path.read_text(encoding="utf-8", errors="replace")
-            if found_zh_sub_path.suffix.lower() == ".vtt":
-                zh_srt_content = _convert_vtt_to_srt(raw_zh_text)
-            else:
-                zh_srt_content = raw_zh_text
+            zh_srt_content = _load_to_srt(found_zh_sub_path)
             if zh_srt_content.strip():
                 zh_srt_path.write_text(zh_srt_content, encoding="utf-8")
 
@@ -544,7 +567,7 @@ class TikTokExtractor(BasePlatformExtractor):
         if real_w and real_h:
             metadata.width = real_w
             metadata.height = real_h
-            metadata.is_vertical = real_h >= real_w
+            metadata.is_vertical = real_h > real_w
 
         # Save metadata.json
         metadata_path.write_text(
