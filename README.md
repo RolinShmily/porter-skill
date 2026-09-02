@@ -290,13 +290,81 @@ mypy porter_skill
 
 ---
 
-## 🙏 鸣谢与致谢 (Acknowledgements)
+## 💖 鸣谢与致谢 (Acknowledgements)
 
-本项目站在巨人的肩膀上，特别鸣谢以下卓越的开源项目：
+本项目站在巨人的肩膀上，借鉴与集成了以下卓越开源项目的优秀设计与技术能力，特此致谢：
 
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) —— 强大健壮的流媒体音视频与字幕提取核心；
-- [VideoCaptioner](https://github.com/WEIFENG2333/VideoCaptioner) —— 优秀的跨平台音视频字幕断句、ASR 转录与翻译工具；
-- [FFmpeg](https://ffmpeg.org/) (with `libass`) —— 现代化多媒体处理与专业级矢量硬字幕渲染基石。
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**：根据 **The Unlicense** 许可证借鉴与调用，提供跨平台流媒体音视频与字幕的高效解析与提取能力；
+- **[VideoCaptioner](https://github.com/WEIFENG2333/VideoCaptioner)**：根据 **GPL-3.0 License** 许可证借鉴其优秀的音视频断句对齐、ASR 语音转录与字幕处理设计思路；
+- **[FFmpeg](https://ffmpeg.org/)** (含 `libass`)：根据 **LGPL-2.1+ / GPL-2.0+** 许可证作为多媒体标准化、音频处理、声学降噪与专业 ASS 矢量字幕渲染核心基石。
+
+<details>
+<summary><b>📜 点击展开查看各开源项目许可证详情 (Open Source Licenses)</b></summary>
+
+### 1. yt-dlp (The Unlicense)
+
+```text
+This is free and unencumbered software released into the public domain.
+
+Anyone is free to copy, modify, publish, use, compile, sell, or
+distribute this software, either in source code form or as a compiled
+binary, for any purpose, commercial or non-commercial, and by any
+means.
+
+In jurisdictions that recognize copyright laws, the author or authors
+of this software dedicate any and all copyright interest in the
+software to the public domain. We make this dedication for the benefit
+of the public at large and to the detriment of our heirs and
+successors. We intend this dedication to be an overt act of
+relinquishment in perpetuity of all present and future rights to this
+software under copyright law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### 2. VideoCaptioner (GNU General Public License v3.0)
+
+```text
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+Everyone is permitted to copy and distribute verbatim copies
+of this license document, but changing it is not allowed.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+```
+
+### 3. FFmpeg & libass (LGPL-2.1+ / GPL-2.0+ / ISC)
+
+```text
+FFmpeg is licensed under the GNU Lesser General Public License (LGPL) version 2.1 or later.
+However, FFmpeg incorporates several optional parts and optimizations that are covered by the
+GNU General Public License (GPL) version 2 or later (e.g. libx264).
+
+libass is licensed under the ISC License (a permissive license functionally equivalent to the 2-clause BSD license):
+Copyright (c) 2006-2024 libass contributors
+Permission to use, copy, modify, and/or distribute this software for any purpose with or without fee is hereby granted.
+```
+
+</details>
 
 ---
 
