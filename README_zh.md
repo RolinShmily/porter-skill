@@ -1,7 +1,7 @@
-# Porter Skill (Streaming Media Porter & AI Video Localizer)
+# Porter Skill (流媒体搬运工)
 
 <p align="center">
-  <b>English | <a href="README_zh.md">简体中文</a></b>
+  <b><a href="README.md">English</a> | 简体中文</b>
 </p>
 
 <p align="center">
@@ -15,140 +15,145 @@
   <img src="https://img.shields.io/badge/type%20checked-mypy-blue.svg" alt="mypy">
 </p>
 
-**Porter Skill (`porter-skill`)** is a production-grade, automated streaming media localization pipeline built for **AI Agents** and **content creators** across Windows, Linux, and macOS. 
+**Porter Skill (`porter-skill`)** 是专为 **AI 智能体（Agent）** 与**个人创作者**打造的跨平台（Windows / Linux / macOS）全自动流媒体搬运、AI 字幕提取、智能翻译与双版本熟肉视频压制出片流水线。
 
-Given any streaming video link, it automatically downloads the high-res master, enhances audio vocals, performs ASR speech recognition with multi-tier zero-key fallbacks, reconstructs sentence-level transcripts, translates via LLM or resilient heuristic engines, formats adaptive vector subtitles (SRT/ASS), and synthesizes dual-version hardsub release videos (`video_bilingual.mp4` and `video_zh.mp4`) in seconds.
-
----
-
-## 📺 Supported Platforms
-
-Built on a modular Adapter Pattern architecture, currently providing deep, out-of-the-box support for major platforms:
-
-- [x] **YouTube** (`youtube.com`, `youtu.be`) —— 1080p/4K adaptive stream downloads, JS challenge solvers, native/auto subtitle extraction, anti-bot browser cookie injection.
-- [x] **X / Twitter** (`x.com`, `twitter.com`, `t.co`) —— Instant `t.co` shortlink unrolling, tweet title cleaning, 1080p stream extraction, 9:16 vertical video adaptive layout.
-- [x] **Instagram** (`instagram.com`, `instagr.am`, `ig.me`) —— Reels, Posts, IGTV, Carousel multi-video filtering, caption title parsing, login-free extraction with Embed fallback.
-- [x] **TikTok** (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`) —— Videos, Embeds, shortlink resolution, auto/native subtitle extraction, caption cleaning, and 9:16 mobile canvas styling.
-- [x] **Bilibili** (`bilibili.com`, `b23.tv`, `bilibili.tv`) —— Standard videos, Bangumi, Cheese courses, B23 shortlinks, CC/AI JSON subtitle parsing, SESSDATA session injection, and adaptive quality.
+只需给出一个视频链接，即可一键自动输出结构规范的**原始物料资产**与**高质量双版本硬字幕熟肉成品**。
 
 ---
 
-## 🌟 Key Features
+## 📺 平台支持与规划 (Supported Platforms & Roadmap)
 
-- ⚡ **Pre-flight Link Probe & Instant URL Expansion**:
-  - Sub-second URL redirection unrolling (`t.co`, `b23.tv`, `bit.ly`), tracking parameter cleansing, and validity probe;
-  - Aspect ratio auto-detection (16:9 widescreen vs 9:16 vertical), with standalone CLI probe `scripts/inspect_link.py <URL>`.
-- 📱 **Aspect-Ratio Aware Typesetting**:
-  - Automatically identifies portrait mobile (9:16) vs widescreen (16:9) formats, applying $\le 13$ CJK char limits and safe vertical bottom margins to prevent UI overlapping.
-- ⚡ **Minimal Dependencies & Zero-Weight Baseline**:
-  - Requires **only standard Python (>= 3.10) and FFmpeg**.
-  - No mandatory heavy local offline weights or paid tool binaries required.
-- 🚀 **Zero-Latency Fast Path**:
-  - Automatically discovers and downloads pre-existing platform subtitles (e.g. YouTube `zh-Hans` / `zh` and `en-orig`);
-  - Merges and aligns bilingual cues with **0s latency and 0 API token cost**.
-- 🎙️ **Multi-Tier ASR Chain & 3-in-1 Vocal Preprocessing (Dual-Track Isolation)**:
-  - **Vocal Enhancement (`raw/audio_enhanced.wav`)**: Built-in FFmpeg 3-in-1 vocal filter chain (80–8000Hz bandpass + `afftdn` FFT adaptive denoise + `dynaudnorm` dynamic vocal leveling) boosts ASR accuracy in noisy speech/podcasts in $<0.2\text{s}$;
-  - **Master Passthrough (`-c:a copy`)**: Phase 4 release video burning uses stream copy on `raw/audio.wav`, preserving 100% original audio purity;
-  - **Resilient ASR Fallback Chain**:
-    $$\text{Whisper API (if key set)} \longrightarrow \text{Pure Python Bcut (Free/No-Key)} \longrightarrow \text{Google Web STT + Zero-Discard Soft VAD} \longrightarrow \text{VideoCaptioner CLI}$$
-- 🌐 **Multi-Tier Translation Disaster Recovery**:
-  - **LLM Semantic Translation (when configured)**: DeepSeek / OpenAI / Claude with dialogue context and typo recovery;
-  - **Zero-Config Resilient Fallback Chain**:
-    $$\text{Pure Python Bing (Copilot Free)} \longrightarrow \text{Google HTTP (Multi-endpoint rotation)} \longrightarrow \text{MyMemory Free API} \longrightarrow \text{VideoCaptioner CLI}$$
-  - **CJK Validation**: Automatically validates and repairs untranslated segments.
-- ⚙️ **Hardware Capability Tiers & Adaptive Encoding**:
-  - Detects hardware profile (Tier A: NVENC/QSV, Tier B: 8+ core CPU, Tier C: N100 / lightweight CPU);
-  - Automatically optimizes x264 presets (`veryfast` / `ultrafast`) and CRF values, speeding up burning by 60%+ on low-power devices;
-  - Media downloads prioritize 1080p and perform lossless remuxing (0.5s stream copy) to prevent double-encoding degradation.
-- 📝 **Structured Transcript & Natural Chinese Phrasing**:
-  - Reconstructs fragmented ASR cues into complete grammatical sentences (`raw/transcript.json` & `raw/transcript.txt`);
-  - Performs whole-sentence translation and phrase-aware CJK cue segmentation ($\le 20$ chars) with proportional timing.
-- 🎨 **Broadcast-Grade Vector Hardsubs**:
-  - Chinese-dominated typesetting: large legible Chinese subtitles on top, scaled secondary English subtitles below;
-  - Rendered with FFmpeg `libass` vector engine and audio direct stream copy (`-c:a copy`).
-- 🍪 **Automated Browser Cookie Inheritance**:
-  - Native `--cookies-from-browser chrome/edge/firefox` flag effortlessly bypasses 429 rate limits, VIP restrictions, and login gates.
+底层基于平台适配器模式（Adapter Pattern）设计，已深度支持主流流媒体平台：
+
+- [x] **YouTube** (`youtube.com`, `youtu.be`) —— 深度适配（支持 1080p/4K 分离流下载、JS 签名挑战求解、多语言原生/机翻字幕提取、反爬/大会员 Cookie 会话注入）
+- [x] **X / Twitter** (`x.com`, `twitter.com`, `t.co`) —— 深度适配（支持短链重定向秒级展开、推文标题智能清洗、1080p 视频流提取、9:16 竖屏手机画幅自适应排版）
+- [x] **Instagram** (`instagram.com`, `instagr.am`, `ig.me`) —— 深度适配（支持 Reels、Posts、IGTV、多视频轮播 Carousels 智能过滤、Caption 标题语义提炼、免登录原生提取与 Embed 降级）
+- [x] **TikTok** (`tiktok.com`, `vm.tiktok.com`, `vt.tiktok.com`) —— 深度适配（支持 Videos、Embeds、短链展开、原生/自动字幕提取、Caption 语义标题清洗与 9:16 竖屏画幅自适应）
+- [x] **Bilibili (哔哩哔哩)** (`bilibili.com`, `b23.tv`, `bilibili.tv`) —— 深度适配（支持标准视频、番剧、课程、B23 短链、CC/AI JSON 字幕解析、SESSDATA/大会员会话注入与画质自适应）
 
 ---
 
-## 📦 Standard Two-Tier Output Layout
+## 🌟 核心特性 (Key Features)
 
-Each job creates an isolated folder `<video_id>_<safe_title>` with a structured two-tier directory:
+- ⚡ **秒级轻量预检与短链展开 (Pre-flight Link Probe)**：
+  - 1 秒内完成 URL 重定向展开（`t.co` / `b23.tv` / `bit.ly` 等）、追踪参数清洗与视频有效性快检；
+  - 自动识别视频画幅比例（横屏 16:9 / 竖屏 9:16），提供独立探测指令 `scripts/inspect_link.py <URL>` 与 `--inspect`。
+- 📱 **画幅自适应排版 (Aspect-Ratio Aware Styling)**：
+  - 智能感知手机竖屏（9:16）与宽屏（16:9），竖屏自动适配 $\le 13$ 字意群断句与防遮挡安全底边距，横竖屏皆获得专业观影体验。
+- ⚡ **极简依赖与开箱即用**：
+  - 系统底线依赖**仅需 Python (>= 3.10) 与 FFmpeg**。
+  - 无需预装任何外部收费工具或复杂的本地大型 ASR 离线模型。
+- 🚀 **智能字幕极速直连 (Zero-Latency Fast Path)**：
+  - 自动探测并并发下载平台原生多语言字幕（如 YouTube `zh-Hans` / `zh` 翻译轨与 `en-orig` 原音轨）；
+  - 自动毫秒级中英文语义对齐与长单行合并，**0 延迟、0 API Token 消耗**快速出片。
+- 🎙️ **多引擎 ASR 链式自适应回退与广播级人声增强（双轨隔离 & 纯 Python 零 Key 闭环）**：
+  - **双轨隔离声学增强 (`raw/audio_enhanced.wav`)**：内置 FFmpeg 原生三合一人声链（80~8000Hz 人声带通 + `afftdn` 自适应 FFT 降噪 + `dynaudnorm` 动态人声均衡），在 0.2 秒内消除电流麦与低频轰鸣并拉齐音量，大幅提升复杂视频与嘈杂演讲的 ASR 字准率；
+  - **母版原音直通 (`-c:a copy`)**：Phase 4 成片压制依然直通复制 `raw/audio.wav` 原声，100% 保持成片音色真实与音质纯净；
+  - 当源视频无原生字幕时，流水线按序自动尝试语音转录：
+    $$\text{Whisper API (若配Key)} \longrightarrow \text{Pure Python Bcut 必剪 (免Key免费/长音频直连)} \longrightarrow \text{Google Web STT + 双层VAD递归切片 (免Key免费)} \longrightarrow \text{VideoCaptioner CLI (可选增强)}$$
+  - Bcut ASR 独立直连突破代理并支持长音频大文件分块；Google STT 具备双层 VAD + 10s 上限递归硬切片保护，彻底杜绝连续对话/播客场景丢句断流；
+  - 在纯净 Python + FFmpeg 环境下 100% 独立完成语音转录，无需下载 GB 级离线权重。
+- 🌐 **多层次翻译与高可用容灾**：
+  - **LLM 大模型驱动（配置 API 时）**：支持 DeepSeek / OpenAI / Claude 等模型，智能断句并修正专业同音错词；
+  - **多级免配置兜底（零配置时）**：
+    $$\text{Pure Python Bing (Copilot 免费)} \longrightarrow \text{Google HTTP (多端轮换/反爬伪装)} \longrightarrow \text{MyMemory 免费 API 兜底} \longrightarrow \text{VideoCaptioner CLI}$$
+  - **中文字符自检 (CJK Validation)**：自动检验并修复未翻译假熟肉，确保 100% 汉化成功。
+- ⚙️ **算力分级与硬件自适应极速压制**：
+  - 自动探测宿主机硬件加速与 CPU 算力（Tier A: NVENC/QSV、Tier B: 8+核多线程、Tier C: N100/树莓派低功耗工控机）；
+  - 自适应调优编码 Preset（`veryfast` / `ultrafast`）与 CRF，在低功耗轻量设备上压制提速 60%+；
+  - 媒体下载优选 1080p 规格并优先采用无损流复制（Remuxing），避免重复重编码画质损失。
+- 📝 **结构化台词本与中文意群句读 (Transcript & Chinese Phrasing)**：
+  - 自动将破碎的 ASR / 平台字幕碎片按语法、静音间隙（$>0.6\text{s}$）与标点重构成完整的英文句子台词本（`raw/transcript.json` 与 `raw/transcript.txt`）；
+  - 基于完整语句进行上下文语义翻译，杜绝碎词直译导致语序颠倒；
+  - 根据中文句读与自然连词进行意群截断（单行 $\le 20$ 字），时间戳按意群字数比例平滑分配，彻底杜绝生硬截断与阅读疲劳。
+- 🎨 **专业级排版与确定性无损压制**：
+  - 中文主导排版：大号清晰中文字幕在上，自适应比例高亮英文字幕在下，单行居中不遮挡；
+  - 采用 FFmpeg `libass` 矢量渲染，音频 `-c:a copy` 直通复制，极速压制且音质 0 损耗。
+- 🍪 **反爬与大会员 Cookie 自动提取**：
+  - 原生支持 `--cookies-from-browser chrome/edge/firefox` 直接读取浏览器会话，轻松跨越 429 限流与年龄限制。
+
+---
+
+## 📦 极简两级输出目录规范
+
+每个任务以 `<video_id>_<safe_title>` 创建独立文件夹，保持极简的两级扁平结构：
 
 ```text
 porter_output/<video_id>_<safe_title>/
-├── raw/                              # [Tier 1: Raw Assets]
-│   ├── video.mp4                     # Standardized master video (H.264 + AAC, faststart)
-│   ├── audio.wav                     # Master audio track (16kHz 16bit mono WAV)
-│   ├── audio_enhanced.wav (Optional) # ASR-enhanced audio track (3-in-1 vocal filtered)
-│   ├── transcript.json               # Structured transcript (Sentence timestamps & mappings)
-│   ├── transcript.txt                # Plain-text transcript (Human-readable bilingual script)
-│   ├── subtitle.srt                  # Clean single-line source subtitles
-│   ├── subtitle_zh.srt (Optional)    # Pre-extracted platform Chinese subtitles (if present)
-│   ├── cover.jpg                     # High-res video cover art
-│   └── metadata.json                 # Comprehensive video metadata
+├── raw/                              # 【一级：原始物料区 (Raw Assets)】
+│   ├── video.mp4                     # 原始标准母版 (H.264 + AAC 广播级封装, faststart)
+│   ├── audio.wav                     # 原始基准音轨 (16kHz 16bit 单声道 WAV)
+│   ├── audio_enhanced.wav (可选)     # ASR 专属增强音轨 (三合一人声带通降噪均衡)
+│   ├── transcript.json               # 结构化台词本 (句级起止时间/中英双语对/原始片段映射)
+│   ├── transcript.txt                # 纯文本台词本 (带时间轴中英对照, 便于人工核对与检索)
+│   ├── subtitle.srt                  # 原始英文/源语言字幕 (长单行规整版)
+│   ├── subtitle_zh.srt (可选)        # 原始平台提取中文字幕 (若平台提供)
+│   ├── cover.jpg                     # 原始高清封面图
+│   └── metadata.json                 # 视频标题、标签、描述及抓取元数据
 │
-└── cooked/                           # [Tier 2: Cooked Releases]
-    ├── subtitle_bilingual.srt        # Bilingual subtitle (Plain SRT)
-    ├── subtitle_bilingual.ass        # Bilingual subtitle (ASS Vector format)
-    ├── subtitle_zh.srt               # Chinese subtitle (Plain SRT)
-    ├── subtitle_zh.ass               # Chinese subtitle (ASS Vector format)
-    ├── video_bilingual.mp4           # [Release 1] Bilingual Hardsub Video
-    └── video_zh.mp4                  # [Release 2] Chinese Hardsub Video
+└── cooked/                           # 【二级：熟肉成品区 (Cooked Releases)】
+    ├── subtitle_bilingual.srt        # 中英双语字幕 (SRT 纯文本)
+    ├── subtitle_bilingual.ass        # 中英双语字幕 (ASS 矢量排版样式)
+    ├── subtitle_zh.srt               # 纯中文字幕 (SRT 纯文本)
+    ├── subtitle_zh.ass               # 纯中文字幕 (ASS 矢量排版样式)
+    ├── video_bilingual.mp4           # 【熟肉成品 1】烧录双语硬字幕高清视频
+    └── video_zh.mp4                  # 【熟肉成品 2】烧录纯中文硬字幕高清视频
 ```
 
 ---
 
-## 🛠️ Installation & Quickstart
+## 🛠️ 安装与快速上手 (Installation & Quickstart)
 
-### 1. Prerequisites (Windows / Linux / macOS)
+### 1. 环境准备 (Windows / Linux / macOS)
 
-Ensure **Python 3.10+** and **FFmpeg** (with `libass` support) are installed:
+确保系统中已安装 **Python 3.10+** 和 **FFmpeg**（需包含 `libass` 库）：
 
-- **Windows** (via winget):
+- **Windows 用户**（使用 winget 极速安装）：
   ```powershell
   winget install Python.Python.3.12
   winget install Gyan.FFmpeg
   ```
-- **Ubuntu / Debian**:
+- **Ubuntu / Debian 用户**：
   ```bash
   sudo apt update && sudo apt install -y ffmpeg python3 python3-pip
   ```
-- **macOS** (via Homebrew):
+- **macOS 用户**：
   ```bash
   brew install ffmpeg python
   ```
 
-### 2. Method A: Install for AI Agents via `npx skills add` (Recommended)
+### 2. 方式 A: 通过 `npx skills add` 一键为 AI Agent 安装（推荐）
 
-Compatible with all AI coding assistants supporting the Agent Skills standard (Pi Coding Agent, Claude Code, Cursor, Windsurf, etc.):
+适用于各类支持 Agent Skills 规范的 AI 编程助手（如 Pi Coding Agent, Claude Code, Cursor, Windsurf 等）：
 
 ```bash
-# Install globally to all detected AI Agents (Recommended)
+# 全局安装到所有检测到的 AI Agent (推荐)
 npx skills add RolinShmily/porter-skill -g
 
-# Or install into the current project workspace
+# 或安装到当前项目工作区
 npx skills add RolinShmily/porter-skill
 
-# Specify an agent with automatic confirmation
+# 指定特定 Agent 并自动确认 (如 pi, claude-code)
 npx skills add RolinShmily/porter-skill -g -a pi -y
 ```
 
-### 3. Method B: Install as Standalone Python CLI
+### 3. 方式 B: 作为独立 Python CLI 工具安装
 
 ```bash
-# Clone the repository
+# 克隆仓库
 git clone https://github.com/RolinShmily/porter-skill.git
 cd porter-skill
 
-# One-click environment bootstrap (Recommended)
+# 使用一键环境脚本配置（推荐）
 bash scripts/setup_env.sh
 
-# Or install directly via pip
+# 或通过 pip / uv 安装
 pip install -e .
 ```
 
-### 4. Method C: Clone into Agent Skill Directory
+### 4. 方式 C: 手动 Git Clone 到 Agent 技能目录
+
+本仓库符合标准 Agent Skill 规范，亦可直接克隆到 Agent 的技能目录（如 `pi-coding-agent`）：
 
 ```bash
 git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/porter-skill
@@ -156,47 +161,47 @@ git clone https://github.com/RolinShmily/porter-skill.git ~/.pi/agent/skills/por
 
 ---
 
-## 💻 CLI Usage Guide
+## 💻 命令行使用指南 (CLI Usage)
 
-### 1. Environment Diagnostic & Doctor Check
+### 1. 环境体检与诊断
 ```bash
 porter --doctor
-# Or run with the standalone script:
+# 或使用免安装脚本:
 python scripts/run_porter.py --doctor
 ```
 
-### 2. Standard Execution (Download ➔ Transcribe ➔ Translate ➔ Release)
+### 2. 标准搬运执行（下载 ➔ 提取 ➔ 翻译 ➔ 双版本出片）
 ```bash
-# Standard pipeline run
+# 标准出片
 porter "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./porter_output"
 
-# Run via portable script
+# 使用免安装脚本执行
 python scripts/run_porter.py "https://www.youtube.com/watch?v=gYxZt9Qe0fk" -o "./porter_output"
 ```
 
-### 3. Common CLI Options
+### 3. 常用进阶参数
 ```bash
-# Inherit browser cookies (Bypass 429 rate limits and age gates)
+# 携带 Chrome 浏览器 Cookie（防 429 与年龄限制）
 porter "<URL>" --cookies-from-browser chrome
 
-# Pre-flight link inspection only
+# 仅执行秒级轻量预检与信息探测
 porter "<URL>" --inspect
 
-# Skip video burning (Generate raw assets & subtitles only)
+# 仅生成原始物料与字幕文件，跳过视频压制
 porter "<URL>" --skip-burn
 
-# Burn only bilingual release video
+# 仅压制双语版本熟肉
 porter "<URL>" --only-bilingual
 
-# Burn only Chinese release video
+# 仅压制纯中文版本熟肉
 porter "<URL>" --only-zh
 ```
 
 ---
 
-## ⚙️ Configuration (`config.json`)
+## ⚙️ 配置文件与环境设置 (`config.json`)
 
-The pipeline works out of the box with zero configuration. To use custom LLM models (e.g. DeepSeek/OpenAI) or adjust subtitle styles, copy `config.example.json` to `config.json`:
+系统默认具备 0 配置兜底能力。若需使用 DeepSeek/OpenAI 大模型翻译或自定义字幕字体样式，可复制 `config.example.json` 为 `config.json`：
 
 ```bash
 cp config.example.json config.json
@@ -238,82 +243,82 @@ cp config.example.json config.json
 }
 ```
 
-### Dynamic Configuration Commands
+### 动态配置命令
 ```bash
-# View active configuration (API Keys automatically masked)
+# 查看当前生效配置（自动脱敏 Key）
 porter --config-show
 
-# Set configuration values
+# 快速修改配置项
 porter --config-set llm.api_key="sk-..."
 porter --config-set cookies_browser="chrome"
 ```
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ 架构与扩展 (Architecture)
 
-The pipeline follows a clean 4-phase decoupled pipeline architecture (Adapter & Pipeline Pattern):
+流水线采用高度解耦的四阶段流水线设计（Pipeline & Adapter Pattern）：
 
 ```
-[ Input Video URL ]
+[ 输入视频链接 ]
        │
        ▼
 ┌────────────────────────────────────────┐
-│  Phase 1: Raw Material Extraction      │ ──> H.264 Master, 16kHz WAV, Raw Subtitles, Cover
+│  Phase 1: 素材抓取 (Extractors)        │ ──> H.264 母版、16kHz WAV、原始字幕、高清封面
 └──────────────────┬─────────────────────┘
                    │
                    ▼
 ┌────────────────────────────────────────┐
-│  Phase 2: Subtitle Resolution & ASR    │ ──> Native Cue Alignment / Multi-Tier ASR / Transcript
+│  Phase 2: 字幕提取与翻译 (Subtitle)    │ ──> 原生字幕对齐 / 多引擎 ASR / LLM 语义优化
 └──────────────────┬─────────────────────┘
                    │
                    ▼
 ┌────────────────────────────────────────┐
-│  Phase 3: Translation & Formatting     │ ──> LLM / Heuristic Translation ➔ Bilingual SRT & ASS
+│  Phase 3: 字幕排版 (Formatting)        │ ──> 生成中英双语与纯中文 SRT / ASS 矢量样式
 └──────────────────┬─────────────────────┘
                    │
                    ▼
 ┌────────────────────────────────────────┐
-│  Phase 4: FFmpeg Hardsub Synthesis     │ ──> video_bilingual.mp4 & video_zh.mp4
+│  Phase 4: FFmpeg 硬字幕压制 (Burn)     │ ──> video_bilingual.mp4 & video_zh.mp4
 └────────────────────────────────────────┘
 ```
 
-For in-depth architectural specifications and data contracts, see [references/ARCHITECTURE.md](references/ARCHITECTURE.md).
+详细技术架构与各阶段输入输出规约请参阅 [references/ARCHITECTURE.md](references/ARCHITECTURE.md)。
 
 ---
 
-## 🧪 Automated Testing & Quality Assurance
+## 🧪 自动化测试与质量保障
 
-The codebase is protected with static type checks and a comprehensive automated test suite:
+项目配备了严格的类型检查与单元测试套件：
 
 ```bash
-# Run unit and integration tests (90+ Tests)
+# 运行单元与集成测试 (90+ Tests)
 pytest
 
-# Code formatting and linting
+# 代码格式化与规范检查
 ruff check .
 ruff format --check .
 
-# Static type checking
+# 严格静态类型检查
 mypy porter_skill
 ```
 
 ---
 
-## 💖 Acknowledgements
+## 💖 鸣谢与致谢 (Acknowledgements)
 
-Standing on the shoulders of giants, this project incorporates and references the excellent designs and capabilities of the following open-source projects:
+本项目站在巨人的肩膀上，借鉴与集成了以下卓越开源项目的优秀设计与技术能力，特此致谢：
 
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**: Leveraged under **The Unlicense**, providing robust cross-platform media extraction and stream parsing;
-- **[VideoCaptioner](https://github.com/WEIFENG2333/VideoCaptioner)**: Referenced under **GPL-3.0 License**, inspiring automated subtitle phrasing, ASR orchestration, and alignment concepts;
-- **[FFmpeg](https://ffmpeg.org/)** (with `libass`): Leveraged under **LGPL-2.1+ / GPL-2.0+**, serving as the bedrock for media standardization, vocal preprocessing, and ASS vector hardsub rendering.
+- **[yt-dlp](https://github.com/yt-dlp/yt-dlp)**：根据 **The Unlicense** 许可证借鉴与调用，提供跨平台流媒体音视频与字幕的高效解析与提取能力；
+- **[VideoCaptioner](https://github.com/WEIFENG2333/VideoCaptioner)**：根据 **GPL-3.0 License** 许可证借鉴其优秀的音视频断句对齐、ASR 语音转录与字幕处理设计思路；
+- **[FFmpeg](https://ffmpeg.org/)** (含 `libass`)：根据 **LGPL-2.1+ / GPL-2.0+** 许可证作为多媒体标准化、音频处理、声学降噪与专业 ASS 矢量字幕渲染核心基石。
 
 <details>
-<summary><b>📜 Click to expand original open-source license texts</b></summary>
+<summary><b>📜 点击展开查看各开源项目官方许可证原文</b></summary>
 
 ### 1. yt-dlp (The Unlicense)
 
-> Source: [yt-dlp/yt-dlp LICENSE](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE)
+> 源仓库出处: [yt-dlp/yt-dlp LICENSE](https://github.com/yt-dlp/yt-dlp/blob/master/LICENSE)
 
 ```text
 This is free and unencumbered software released into the public domain.
@@ -344,7 +349,7 @@ For more information, please refer to <http://unlicense.org/>
 
 ### 2. VideoCaptioner (GNU General Public License v3.0)
 
-> Source: [WEIFENG2333/VideoCaptioner LICENSE](https://github.com/WEIFENG2333/VideoCaptioner/blob/main/LICENSE)
+> 源仓库出处: [WEIFENG2333/VideoCaptioner LICENSE](https://github.com/WEIFENG2333/VideoCaptioner/blob/main/LICENSE)
 
 ```text
 GNU GENERAL PUBLIC LICENSE
@@ -1025,7 +1030,7 @@ Public License instead of this License.  But first, please read
 
 ### 3. FFmpeg (LGPL v2.1+ / GPL v2+)
 
-> Source: [FFmpeg/FFmpeg LICENSE.md](https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md)
+> 源仓库出处: [FFmpeg/FFmpeg LICENSE.md](https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md)
 
 ```text
 # License
@@ -1159,7 +1164,7 @@ compatible with the LGPL.
 
 ### 4. libass (ISC License)
 
-> Source: [libass/libass COPYING](https://github.com/libass/libass/blob/master/COPYING)
+> 源仓库出处: [libass/libass COPYING](https://github.com/libass/libass/blob/master/COPYING)
 
 ```text
 ISC License
@@ -1183,6 +1188,6 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ---
 
-## 📜 License
+## 📜 开源许可证 (License)
 
-Licensed under the [MIT License](LICENSE).
+本项目基于 [MIT License](LICENSE) 协议开源。

@@ -94,7 +94,8 @@ porter-skill/
     "language": "auto",
     "whisper_api_key": "sk-your-openai-key",
     "whisper_api_base": "https://api.openai.com/v1",
-    "whisper_model": "whisper-1"
+    "whisper_model": "whisper-1",
+    "audio_denoise": true
   },
   "style": {
     "zh_font": "Microsoft YaHei",
@@ -106,7 +107,11 @@ porter-skill/
     "outline_color": "&H00000000",
     "outline_width": 3.5,
     "shadow": 1.5,
-    "margin_v": 30
+    "margin_v": 35,
+    "bilingual_zh_margin_v": 90,
+    "bilingual_en_margin_v": 35,
+    "fade_in_ms": 120,
+    "fade_out_ms": 120
   },
   "cookies_browser": "chrome",
   "cookies_file": ""
