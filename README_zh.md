@@ -106,7 +106,7 @@ porter_output/<video_id>_<safe_title>/
 
 ### 1. 环境准备 (Windows / Linux / macOS)
 
-确保系统中已安装 **Python 3.10+** 和 **FFmpeg**（需包含 `libass` 库）：
+**基础底线依赖（必需）**：确保系统中已安装 **Python 3.10+** 和 **FFmpeg**（需包含 `libass` 库）：
 
 - **Windows 用户**（使用 winget 极速安装）：
   ```powershell
@@ -121,6 +121,18 @@ porter_output/<video_id>_<safe_title>/
   ```bash
   brew install ffmpeg python
   ```
+
+> 💡 **推荐可选工具（获得更佳体验）**：  
+> 虽然 porter-skill 内置了纯 Python 零 Key 兜底能力，但安装系统级 `yt-dlp` 与 `videocaptioner` 可获得更强的流媒体解密速度、JS 挑战求解及额外的离线 ASR/翻译增强：
+> ```bash
+> # 安装 / 更新独立 yt-dlp 命令行工具
+> pip install -U yt-dlp
+> # 或在 macOS / Windows 上：
+> # brew install yt-dlp  |  winget install yt-dlp.yt-dlp
+>
+> # (可选) 安装 VideoCaptioner CLI 以支持更多本地/扩展 ASR 与翻译引擎
+> pip install videocaptioner
+> ```
 
 ### 2. 方式 A: 通过 `npx skills add` 一键为 AI Agent 安装（推荐）
 

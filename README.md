@@ -103,7 +103,7 @@ porter_output/<video_id>_<safe_title>/
 
 ### 1. Prerequisites (Windows / Linux / macOS)
 
-Ensure **Python 3.10+** and **FFmpeg** (with `libass` support) are installed:
+**Baseline Requirements (Required)**: Ensure **Python 3.10+** and **FFmpeg** (with `libass` support) are installed:
 
 - **Windows** (via winget):
   ```powershell
@@ -118,6 +118,18 @@ Ensure **Python 3.10+** and **FFmpeg** (with `libass` support) are installed:
   ```bash
   brew install ffmpeg python
   ```
+
+> 💡 **Recommended Optional Tools (Enhanced Experience)**:  
+> While porter-skill runs 100% standalone with pure-Python zero-key fallbacks, installing system-level `yt-dlp` and `videocaptioner` provides faster media parsing, broader JS challenge solving, and additional offline ASR/translation engines:
+> ```bash
+> # Install / update standalone yt-dlp
+> pip install -U yt-dlp
+> # Or on macOS / Windows:
+> # brew install yt-dlp  |  winget install yt-dlp.yt-dlp
+>
+> # (Optional) Install VideoCaptioner CLI for extra local ASR & translation engines
+> pip install videocaptioner
+> ```
 
 ### 2. Method A: Install for AI Agents via `npx skills add` (Recommended)
 
